@@ -192,10 +192,6 @@ Found a bug? Have a feature request? Open an issue with:
 
 ---
 
-## License
-
-[TBD — See LICENSE file when decided]
-
 **Credits:**
 - **X-Raym** — Original tempo marker deletion script structure
 - **Tormy Van Cool** — CSV export/import framework

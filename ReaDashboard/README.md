@@ -57,6 +57,4 @@ The **Recent** tab works immediately with no configuration - it reads directly f
 - **Unique filenames required**: The script identifies projects by their filename. If two projects in different folders have the same `.rpp` filename, they will share metadata. Ensure project files have unique names across directories.
 - **Spicetify integration is optional**: Most users will not have a Spicetify database. The script is fully functional without it - BPM, key, and other metadata can be overridden manually via tags.
 
-## License
-
-MIT License. Based on the [ReaLauncher](https://forum.cockos.com/showthread.php?t=244541) concept by solger.
+Based on [ReaLauncher's](https://forum.cockos.com/showthread.php?t=244541) concept by solger.
