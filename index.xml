@@ -1,0 +1,303 @@
+<?xml version="1.0" encoding="utf-8"?>
+<index version="1" commit="487c919b1158ff9bb6638b487c056d3421879af0">
+  <category name="ReaDashboard">
+    <reapack name="Anshul_ReaDashboard.lua" type="script" desc="ReaDashboard">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 A modern, feature-rich project dashboard for REAPER built with ReaImGui. Browse, search, filter, and manage your projects with metadata, tags, and album art.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\b Requirements:}\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab ReaImGui\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab SWS Extensions\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0.0" author="Anshul" time="2026-04-06T22:41:05Z">
+        <changelog><![CDATA[v1.0.0 (2026-04-06)
+  + Initial release]]></changelog>
+        <source main="main">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/02803b975104012d245a3ea775bbb851fea84067/ReaDashboard/Anshul_ReaDashboard.lua</source>
+      </version>
+    </reapack>
+  </category>
+  <category name="Scripts">
+    <reapack name="Anshul - Auto Align Items.lua" type="script" desc="Auto Align Items">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Automatically aligns two audio items by their audio content using MFCC cross-correlation. Best for aligning ~95%-100% similar recordings of the same source (vocals + instrumental, stem tracks, etc).\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\b Workflow:}\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 1.\tx360\tab Select exactly 2 audio items\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 2.\tx360\tab Run this script\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 3.\tx360\tab Review detected offset and confidence score\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 4.\tx360\tab Optionally apply Phase Alignment (native REAPER micro-alignment)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\b Reference/Target Assignment:} Lower track number = reference (stays put). Same track: earlier position = reference.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\b Requirements:}\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Python 3.x (https://www.python.org)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab pip install audio-offset-finder\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab FFmpeg in PATH (https://ffmpeg.org)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Companion file: align_helper.py (same folder as script)\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.5" author="Anshul" time="2026-04-06T22:41:05Z">
+        <changelog><![CDATA[v1.5 (2026-04-06)
+  + ReaPack release formatting]]></changelog>
+        <source main="main">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/02803b975104012d245a3ea775bbb851fea84067/Scripts/Anshul%20-%20Auto%20Align%20Items.lua</source>
+        <source file="align_helper.py">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/02803b975104012d245a3ea775bbb851fea84067/Scripts/align_helper.py</source>
+      </version>
+    </reapack>
+    <reapack name="Anshul - Command Center Tools GUI.lua" type="script" desc="Command Center Tools GUI">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Floating control panel for quick access to custom REAPER scripts and community tools. Features a button grid organized by sections, live project info strip, and customizable button layout via cc_buttons.json.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\b Button Types:}\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Personal scripts (Anshul's custom scripts in Scripts folder)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Community scripts (Reference folder scripts)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER native actions (workflow actions like Phase Alignment)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Workflow utilities (imported from elsewhere)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\b Requirements:}\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab ReaImGui extension (install via Extensions > ReaPack)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Companion file: json.lua (same folder as script)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Optional: cc_buttons.json for button customization\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.7" author="Anshul" time="2026-04-06T22:59:42Z">
+        <changelog><![CDATA[v1.7 (2026-03-31)
+  + Finalized for ReaPack release]]></changelog>
+        <source main="main">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/487c919b1158ff9bb6638b487c056d3421879af0/Scripts/Anshul%20-%20Command%20Center%20Tools%20GUI.lua</source>
+        <source file="json.lua">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/487c919b1158ff9bb6638b487c056d3421879af0/Scripts/json.lua</source>
+      </version>
+    </reapack>
+    <reapack name="Anshul - Delete All Tempo Map Markers.eel" type="script" desc="Delete all tempo markers">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Deletes all tempo/time signature markers from the project after confirmation.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Run the script and confirm the deletion prompt. Supports undo with Ctrl+Z.\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.2" author="Anshul" time="2026-04-06T22:41:05Z">
+        <changelog><![CDATA[v1.2 (2026-03-29)
+  + Confirmation prompt with marker count before deletion
+  + Guard: no-op if no markers exist
+  # Fixed off-by-one bug (loop started at count instead of count-1, skipping index 0)
+v1.1 (2017-05-30)
+  # Various fixes (Thanks MPL!)
+v1.0 (2015-04-24)
+  + Initial Release]]></changelog>
+        <source main="main">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/02803b975104012d245a3ea775bbb851fea84067/Scripts/Anshul%20-%20Delete%20All%20Tempo%20Map%20Markers.eel</source>
+      </version>
+    </reapack>
+    <reapack name="Anshul - Export Tempo Map.lua" type="script" desc="Export Tempo Map to CSV">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Exports all tempo and time signature markers from the current project to a CSV file.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 The user chooses the output path via file dialog. Requires the project to be saved.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\b Requirements:}\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab js_ReaScriptAPI extension (install via Extensions > ReaPack)\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="2.2" author="Anshul" time="2026-04-06T22:41:05Z">
+        <changelog><![CDATA[v2.2 (2026-03-26)
+  + File save dialog — user chooses path instead of hardcoded project folder
+  + Guard: abort if project not saved
+  + Guard: abort if no tempo markers exist
+  - Removed TXT and HTML output (see comments below to restore)
+v2.1 (03 august 2022) - Full header + min header
+v2.0 (26 july 2022)  + curveType
+v1.9 (25 july 2022)  # Wrong header in console
+v1.8 (25 july 2022)  + CSV Headers / # Variable names
+v1.7 (24 july 2022)  # Double records on TXT / + CSV Beat field
+v1.6 (24 july 2022)  # HTML Even/Odd lines
+v1.5 (24 july 2022)  # Cleaned HTML
+v1.4 (24 july 2022)  + HTML page + TXT page
+v1.3 (23 july 2022)  # Comma separated
+v1.2 (23 july 2022)  # Exports with predetermined file_name
+v1.1 (23 july 2022)  # Time in format HH:mm:ss
+v1.0 (23 july 2022)  + Initial release]]></changelog>
+        <source main="main">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/02803b975104012d245a3ea775bbb851fea84067/Scripts/Anshul%20-%20Export%20Tempo%20Map.lua</source>
+      </version>
+    </reapack>
+    <reapack name="Anshul - Extract Tempo Map (Click Track).lua" type="script" desc="Extract Tempo Map (Click Track)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Extracts a tempo map from a perfectly-aligned click track using transient detection and grid analysis. Useful for recordings that need accurate tempo mapping without relying on beat detection AI.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Workflow:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 1.\tx360\tab Select an audio item containing a click track or metronome\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 2.\tx360\tab Run this script\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 3.\tx360\tab Configure anchor point, time signature, and transient detection settings\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 4.\tx360\tab Place markers at detected transients and snap to nearest grid\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 5.\tx360\tab Review and approve; markers are converted to the project tempo envelope\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\b Requirements:}\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab SWS Extensions (for SNM transient detection functions)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Python 3.x (for optional tempo normalization)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab beat_this or beat_net packages (optional, for advanced detection)\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" author="Anshul" time="2026-04-06T22:41:05Z">
+        <changelog><![CDATA[v1.0 (2026-04-06)
+  + Initial release]]></changelog>
+        <source main="main">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/02803b975104012d245a3ea775bbb851fea84067/Scripts/Anshul%20-%20Extract%20Tempo%20Map%20(Click%20Track).lua</source>
+      </version>
+    </reapack>
+    <reapack name="Anshul - Extract Tempo Map From Item.lua" type="script" desc="Extract Tempo Map from Audio Item (Beat This!)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Detects beats and downbeats in an audio item using the Beat This! machine learning model, then converts them into a project tempo map with automatic anchor/setup tempos.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\b Workflow:}\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 1.\tx360\tab Select a drum stem or metronome audio item\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 2.\tx360\tab Run this script (or select 2+ items to mix for richer detection)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 3.\tx360\tab Configure source type (auto/click/drum/mix), BPM hint, detail level\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 4.\tx360\tab Phase 1: place markers at detected beats and snap to transients\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 5.\tx360\tab Phase 2: review and convert markers to tempo envelope\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\b Requirements:}\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Python 3.x (https://www.python.org)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab pip install torch (from https://pytorch.org \u8212- match your CUDA version)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab pip install tqdm einops soxr rotary-embedding-torch soundfile\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab pip install https://github.com/CPJKU/beat_this/archive/main.zip\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab FFmpeg in PATH (https://ffmpeg.org)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab SWS Extensions (for advanced snap features)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Companion files: beat_this_helper.py, audio_mix_helper.py (same folder as script)\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="5.3" author="Anshul" time="2026-04-06T22:41:05Z">
+        <changelog><![CDATA[v5.3 (2026-04-06)
+  + ReaPack release formatting
+v5.2 (2026-03-29)
+  + Marker names simplified: __BT_<token>_N -> BT_N (drop session tokens)
+  + Marker colours unified: all BT markers are plain blue (was cyan/green/magenta)
+  + audio_mix_helper.py: ffmpeg pre-decode for all inputs (MP3/FLAC/OGG/M4A support)
+  + audio_mix_helper.py: site-packages injection before third-party imports (crash fix)
+  + audio_mix_helper.py: try/except prints errors to stdout so REAPER shows them
+  + SWS safety check added to Phase 1 Preview (parity with Phase 2)
+v5.1 (2026-03-29)
+  + Multi-item merge: select 2+ items to combine audio for richer beat detection
+  + New audio_mix_helper.py: mixes files with resampling to highest sample rate
+  + Preview tempo map: interactive=on creates markers + preview grid (two undo blocks)
+  + Interactive field now tri-state: off (auto), on (preview), map (markers only)
+  + Separate undo blocks: Ctrl+Z removes preview map first, then markers
+  + Phase 2 handles preview map cleanup before rebuilding
+v5.0 (2026-03-29)
+  + Interactive two-phase mode: Phase 1 places/snaps markers, Phase 2 converts
+  + ProjExtState carries source type, detail mode, BPM context between phases
+  + Color-coded markers: cyan=anchor, green=downbeat, magenta=regular beat
+  + Phase 2 short prompt (conversion + action) with abort+cleanup option
+  + Phase 2 validates marker count before converting
+  + Orphaned marker handling (BT markers exist but no stored state)
+  + Edit cursor moves to first marker after Phase 1
+  + Phase 1 cleanup on error (partial markers removed)
+v4.0 (2026-03-29)
+  + Added transient snap pipeline: temp project markers -> snap to transients -> convert
+  + Three conversion backends: native (action 40338), SWS, direct (API)
+  + Config popup expanded to 6 fields: source, BPM, detail, snap, window, conversion
+  + Snap window defaults to 50% of one beat interval (dynamic from reference BPM)
+  + Temp markers use unique session token + color for safe cleanup
+  + Snap statistics: accepted/rejected/unchanged count, avg/max delta
+  + Direct+snap mode preserves all time sig/anchor metadata via existing apply_events
+v3.0 (2026-03-29)
+  + Added source-aware modes: auto, click, drum, mix
+  + Added optional expected BPM hint (manual or filename-derived)
+  + Added wrap-aware source projection for looped/slip-edited items
+  + Click mode now prioritizes beat/grid alignment over synthetic setup tempo
+  + Improved error logging and Beat This process output visibility
+v2.1 (2026-03-28)
+  + Require exactly one selected audio item to avoid grouped-item mistakes
+  + Detect unreliable downbeats automatically and fall back to beat-grouped bars
+  + Setup tempo now comes from early beat timing instead of fragile downbeat bars
+  + Avoid double-defining bar 1 when project start and song anchor are effectively the same bar
+v2.0 (2026-03-28)
+  + Reworked around a cleanup and anchor pipeline instead of raw per-beat import
+  + Setup tempo at project start derived from the first 2-3 detected bars
+  + First usable downbeat is treated as the song anchor candidate
+  + Preserves current project time signatures by default
+  + Supports bar-level (default) and beat-level marker detail
+  + Shorter Beat This timeout to reduce long REAPER freezes]]></changelog>
+        <source main="main">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/02803b975104012d245a3ea775bbb851fea84067/Scripts/Anshul%20-%20Extract%20Tempo%20Map%20From%20Item.lua</source>
+        <source file="beat_this_helper.py">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/02803b975104012d245a3ea775bbb851fea84067/Scripts/beat_this_helper.py</source>
+        <source file="audio_mix_helper.py">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/02803b975104012d245a3ea775bbb851fea84067/Scripts/audio_mix_helper.py</source>
+        <source file="beat_net_helper.py">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/02803b975104012d245a3ea775bbb851fea84067/Scripts/beat_net_helper.py</source>
+      </version>
+    </reapack>
+    <reapack name="Anshul - Import Moises Stems (ZIP).lua" type="script" desc="Import Moises Stems (Archive or Folder)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Imports all audio stems from a Moises archive or extracted folder into a structured folder track in REAPER.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\b Workflow:}\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 1.\tx360\tab Run this script\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 2.\tx360\tab Pick EITHER:\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab A Moises archive (.zip, .7z, etc.) \u8212- will extract first\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Any audio stem file (.wav/.mp3/.m4a/.flac) in an already-extracted folder \u8212- will scan and import\sa180\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 3.\tx360\tab All stems are imported as child tracks with pre-set volumes\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 4.\tx360\tab Unrecognized audio files are added in a "Pass 2" sweep (future-proofs for new stems)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\b Supported Formats:} WAV, MP3, M4A, FLAC\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\b Supported Archives:} ZIP, 7Z, RAR, tar.gz, tgz, tar.bz2, tar.xz\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\b Requirements:}\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab js_ReaScriptAPI extension (install via Extensions > ReaPack)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Windows 10/11 (uses built-in tar/bsdtar for archive extraction)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Note: RAR archives are NOT supported by Windows built-in tar; use ZIP/7Z instead\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" author="Anshul" time="2026-04-06T22:41:05Z">
+        <changelog><![CDATA[v1.0 (2026-03-30)
+  + Universal picker: archives OR audio files
+  + Support for ZIP, 7Z, RAR, tar variants
+  + Added stems: guitars, keys, piano, strings, synth
+  + Pass 2 sweep for unknown audio files]]></changelog>
+        <source main="main">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/02803b975104012d245a3ea775bbb851fea84067/Scripts/Anshul%20-%20Import%20Moises%20Stems%20(ZIP).lua</source>
+      </version>
+    </reapack>
+    <reapack name="Anshul - Import Tempo Map.lua" type="script" desc="Import Tempo Markers from CSV">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Imports tempo and time signature markers into the current project from a CSV file.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 The user chooses the CSV file via file dialog. The imported markers must match the CSV format produced by "Export Tempo Map to CSV" (v2.2+).\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\b Requirements:}\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab js_ReaScriptAPI extension (install via Extensions > ReaPack)\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.3" author="Anshul" time="2026-04-06T22:41:05Z">
+        <changelog><![CDATA[v1.3 (2026-03-26)
+  + File open dialog — user chooses file instead of hardcoded project folder
+  + Undo block — entire import is a single Ctrl+Z operation
+  + Overwrite / Merge / Cancel dialog when existing markers are present
+  + Per-row error tracking (previously only checked the last row's result)
+  + Shows count of successfully imported and failed markers
+v1.2 (03 august 2022) + Gradual change support
+v1.1 (03 august 2022) + Avoid header line + version
+v1.0 (27 july 2022)  + Initial release]]></changelog>
+        <source main="main">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/02803b975104012d245a3ea775bbb851fea84067/Scripts/Anshul%20-%20Import%20Tempo%20Map.lua</source>
+      </version>
+    </reapack>
+  </category>
+</index>
