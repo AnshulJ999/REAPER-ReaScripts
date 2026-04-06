@@ -1,26 +1,28 @@
-name: Package with ReaPack
-
+name: deploy
 on:
   push:
-    branches:
-      - main
-
+    branches: [main]   # yours is 'main' not 'master', so change this
 jobs:
-  package:
-    name: Build index.xml
+  reapack-index:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # full history needed for changelog parsing
-
-      - name: Run reapack-index
-        uses: cfillion/reapack-index@v1
-        with:
-          args: --progress --commit --push https://github.com/AnshulJ999/REAPER-ReaScripts
-        env:
-          GIT_AUTHOR_NAME: GitHub Actions
-          GIT_AUTHOR_EMAIL: actions@github.com
-          GIT_COMMITTER_NAME: GitHub Actions
-          GIT_COMMITTER_EMAIL: actions@github.com
+    - name: Fetch repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Configure git
+      run: |-
+        git config user.name  'GitHub Actions'
+        git config user.email 'actions@github.com'
+    - name: Install Pandoc
+      run:  sudo apt-get install -yy pandoc
+    - name: Set up Ruby
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: 3.2
+    - name: Install reapack-index
+      run:  gem install reapack-index
+    - name: Update index.xml
+      run:  reapack-index --commit
+    - name: Push changes
+      run:  git push
