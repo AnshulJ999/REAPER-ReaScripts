@@ -4,6 +4,10 @@ A modern, feature-rich project dashboard for [REAPER](https://www.reaper.fm/), b
 
 Browse, search, filter, and manage your REAPER projects with album art, metadata, custom tags, and more.
 
+# Note
+
+This was built for my personal use and is optimized for my workflow: I'm a guitarist who learns/covers a lot of songs.
+
 ## Features
 
 - **Recent & All Projects** - Browse recent projects from REAPER's history or scan an entire folder tree
@@ -19,7 +23,7 @@ Browse, search, filter, and manage your REAPER projects with album art, metadata
 
 ## Requirements
 
-- **REAPER** v6.0+ (v7+ recommended)
+- **REAPER** v5.0+ (v6+ recommended)
 - **ReaImGui** - Install via ReaPack (`Extensions > ReaPack > Browse packages`, search "ReaImGui")
 - **SWS Extension** - Required for clipboard, file browsing, and project management features. [Download SWS](https://www.sws-extension.org/)
 - **js_ReaScriptAPI** (Recommended) - Install via ReaPack for fast file info lookups
@@ -51,6 +55,9 @@ The **Recent** tab works immediately with no configuration - it reads directly f
 | `Ctrl+Click` | Multi-select |
 | `Shift+Click` | Range select |
 | `Ctrl+C` | Copy project path |
+| `Ctrl+B` | Close the launcher |
+| `Ctrl+Tab` | Switch tabs |
+| `Ctrl+1,2,3,4` | Switch tabs |
 
 ## Known Limitations
 

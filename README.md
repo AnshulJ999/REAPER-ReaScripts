@@ -1,29 +1,37 @@
-# REAPER-ReaScripts
+# REAPER Scripts
 
-A collection of Lua scripts for [REAPER](https://www.reaper.fm/) — focused on tempo mapping, audio alignment, and project management.
+A collection of personal scripts for [REAPER](https://www.reaper.fm/)
+
+To use this, please add this repo to your ReaPack
+
+```
+https://github.com/AnshulJ999/REAPER-ReaScripts/raw/main/index.xml
+```
+
+Or manually download script files and load them into REAPER as you wish.
 
 ---
 
 ## ReaDashboard
 
-A modern project dashboard built with ReaImGui — browse, search, and manage your REAPER projects with album art, custom tags, metadata, grid/list views, and keyboard navigation.
+A modern project dashboard built with ReaImGui — browse, search, and manage your REAPER projects with album art, custom tags, metadata, filters, grid/list views, and much more.
 
 → [Full documentation](ReaDashboard/README.md)
 
-**Requirements:** REAPER v6+, ReaImGui, SWS Extensions  
+**Requirements:** REAPER, ReaImGui, SWS Extensions  
 **Install via ReaPack** or drop `Anshul_ReaDashboard.lua` into your Scripts folder.
 
 ---
 
 ## Scripts
 
-A set of workflow tools for tempo mapping, audio alignment, and stem management.
+A set of workflow tools for tempo mapping, audio alignment, and stem management. All were created for personal usage.
 
 → [Full documentation + install guide](Scripts/README.md)
 
 | Script | What It Does |
 |---|---|
-| **Extract Tempo Map (Audio)** | AI beat detection on drum/mixed stems → tempo markers |
+| **Extract Tempo Map (Audio)** | BeatThis! detection on drum/mixed stems → tempo markers |
 | **Extract Tempo Map (Click Track)** | Fast transient-based click track analysis |
 | **Auto Align Items** | Align two audio takes via MFCC cross-correlation |
 | **Fit Item To Tempo Map** | Stretch markers to sync video/audio to project tempo |
@@ -42,6 +50,12 @@ A set of workflow tools for tempo mapping, audio alignment, and stem management.
 3. Browse packages and install what you need
 
 ---
+
+# Note
+
+All scripts were created for personal use and are provided as-is. The development process included AI assistance.
+
+Please file any issues if you find any bugs or have any suggestions.
 
 ## Credits
 
