@@ -1,0 +1,45 @@
+// @description Delete all tempo markers
+// @version 1.2
+// @author Anshul
+// @credits X-Raym (original script structure, v1.0/v1.1)
+// @about
+//   Deletes all tempo/time signature markers from the project after confirmation.
+//
+//   Run the script and confirm the deletion prompt. Supports undo with Ctrl+Z.
+// @changelog
+//   v1.2 (2026-03-29)
+//     + Confirmation prompt with marker count before deletion
+//     + Guard: no-op if no markers exist
+//     # Fixed off-by-one bug (loop started at count instead of count-1, skipping index 0)
+//   v1.1 (2017-05-30)
+//     # Various fixes (Thanks MPL!)
+//   v1.0 (2015-04-24)
+//     + Initial Release
+
+function main()
+(
+	count_tempo_markers = CountTempoTimeSigMarkers(0);
+
+	count_tempo_markers == 0 ? (
+		MB("No tempo markers found. Nothing to delete.", "Delete all tempo markers", 0);
+	) : (
+		// MB type 1 = OK/Cancel. Returns 1 = OK, 2 = Cancel.
+		sprintf(msg, "Delete all %d tempo marker(s)?\n\nThis can be undone with Ctrl+Z.", count_tempo_markers);
+		result = MB(msg, "Delete all tempo markers", 1);
+
+		result == 1 ? (
+			Undo_BeginBlock();
+			i = count_tempo_markers - 1;
+			loop(count_tempo_markers,
+				DeleteTempoTimeSigMarker(0, i);
+				i -= 1;
+			);
+			Undo_EndBlock("Delete all tempo markers", 0);
+
+			UpdateArrange();
+			UpdateTimeline();
+		);
+	);
+);
+
+main();
