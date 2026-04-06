@@ -1,0 +1,26 @@
+name: Package with ReaPack
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  package:
+    name: Build index.xml
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history needed for changelog parsing
+
+      - name: Run reapack-index
+        uses: cfillion/reapack-index@v1
+        with:
+          args: --progress --commit --push https://github.com/AnshulJ999/REAPER-ReaScripts
+        env:
+          GIT_AUTHOR_NAME: GitHub Actions
+          GIT_AUTHOR_EMAIL: actions@github.com
+          GIT_COMMITTER_NAME: GitHub Actions
+          GIT_COMMITTER_EMAIL: actions@github.com
