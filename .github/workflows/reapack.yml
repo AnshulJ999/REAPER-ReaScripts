@@ -1,7 +1,7 @@
 name: deploy
 on:
   push:
-    branches: [main]   # yours is 'main' not 'master', so change this
+    branches: [main]
 jobs:
   reapack-index:
     runs-on: ubuntu-latest

@@ -18,7 +18,6 @@
 --   - Optional: cc_buttons.json for button customization
 -- @provides
 --   json.lua
---   cc_buttons.json
 -- @changelog
 --   v1.7 (2026-03-31)
 --     + Finalized for ReaPack release

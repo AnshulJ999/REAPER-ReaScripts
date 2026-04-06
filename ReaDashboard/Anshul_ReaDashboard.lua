@@ -76,7 +76,7 @@ local KEY_NAMES = {
 local MODE_NAMES = { [0] = 'minor', [1] = 'major' }
 
 -- Tag presets
--- Commonly used tunings first (Anshul's guitars: Cathode in Drop D/E Std, Ibanez 7 in Drop A)
+-- Commonly used tunings first
 local TUNING_PRESETS = {
   'Drop D', 'Drop A', 'E Standard',             -- most used (top)
   'Eb Standard', 'D Standard',                   -- standard variants
@@ -94,7 +94,7 @@ local TRANSPOSE_PRESETS = {
 
 -- Guitar presets
 local GUITAR_PRESETS = {
-  'Cathode 6-string', 'Ibanez Q 7-string', 'Custom',
+  'Gibson', 'Fender', 'PRS', 'Ibanez', 'ESP', 'Schecter', 'Jackson', 'Custom',
 }
 
 local STATUS_PRESETS = {
