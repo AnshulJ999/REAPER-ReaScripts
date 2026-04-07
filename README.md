@@ -14,6 +14,8 @@ Or manually download script files and load them into REAPER as you wish.
 
 ## ReaDashboard
 
+https://github.com/user-attachments/assets/2ce6c0c7-a19d-45bc-98c9-91b749bba6d4
+
 A modern project launcher built with ReaImGui — browse, search, and manage your REAPER projects with album art, custom tags, metadata, filters, grid/list views, and much more.
 
 → [Full documentation](ReaDashboard/README.md)
