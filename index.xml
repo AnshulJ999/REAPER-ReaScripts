@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" commit="83d77e39fd6eb414fd0e1b200e1ccffa60fae76c" name="Anshul-ReaScripts">
+<index version="1" commit="a328394461df110b11891cdb39f7bd826ee8802e" name="Anshul-ReaScripts">
   <category name="ReaDashboard">
     <reapack name="Anshul_ReaDashboard.lua" type="script" desc="ReaDashboard">
       <metadata>
@@ -56,12 +56,12 @@
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Floating control panel for quick access to custom REAPER scripts and community tools. Features a button grid organized by sections, live project info strip, and customizable button layout via cc_buttons.json.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 {\b Button Types:}\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Personal scripts (Anshul's custom scripts in Scripts folder)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Community scripts (Reference folder scripts)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER native actions (workflow actions like Phase Alignment)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Workflow utilities (imported from elsewhere)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Floating control panel for quick access to custom scripts and tools. Features a single "Default" section with hardcoded scripts + auto-discovered scripts, a live project info strip, and fully customizable button layout via cc_buttons.json.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\b How it works:}\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hardcoded buttons: 9 core scripts (Extract Tempo Map, Import Moises Stems, etc.)\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab ReaDashboard from the sibling ReaDashboard/ folder\sa180\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Auto-detected buttons: Any new .lua/.eel scripts in the Scripts folder are automatically discovered and added with tooltips from @description headers\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Custom layout: Users can customize via the built-in editor \u8594 ? saves to cc_buttons.json\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 {\b Requirements:}\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab ReaImGui extension (install via Extensions > ReaPack)\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Companion file: json.lua (same folder as script)\par}
@@ -317,13 +317,14 @@ v1.0 (27 july 2022)  + Initial release]]></changelog>
 {\pard \ql \f0 \sa180 \li0 \fi0 A collection of personal scripts for REAPER \u8212- built for my workflow as a guitarist learning and covering songs.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 What's Included\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 {\b ReaDashboard} \u8212- Modern project launcher built with ReaImGui. Browse, search, filter, and manage your REAPER projects with album art, custom tags, metadata, grid/list views, and keyboard navigation.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\b Command Center GUI} \u8212- Floating toolbar for quick access to all scripts (9 core scripts + auto-discovered scripts). Includes ReaDashboard, tempo mapping, audio alignment, and stem import tools. Fully customizable and extensible.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 {\b Workflow Scripts} \u8212- Tempo mapping (AI-powered beat detection from audio or click tracks), audio alignment via MFCC cross-correlation, tempo map import/export, video/audio stretching to match tempo, and Moises stem import with automatic track organization.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Quick Start\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 1.\tx360\tab In REAPER: {\f1 Extensions > ReaPack > Import repositories}\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 2.\tx360\tab Paste: {\f1 https://raw.githubusercontent.com/AnshulJ999/REAPER-ReaScripts/main/index.xml}\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 3.\tx360\tab Browse and install what you need\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Or download manually and place scripts in your REAPER Scripts folder.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 For full documentation, see the README files in the repository.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 For full documentation, see the README files in the GitHub repository https://github.com/AnshulJ999/REAPER-ReaScripts.\par}
 }
 ]]></description>
   </metadata>
