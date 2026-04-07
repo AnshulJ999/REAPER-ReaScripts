@@ -1,6 +1,6 @@
 -- @description Command Center Tools GUI
 -- @author Anshul
--- @version 1.7
+-- @version 1.8
 -- @about
 --   Floating control panel for quick access to custom REAPER scripts and community tools.
 --   Features a button grid organized by sections, live project info strip, and customizable
@@ -19,6 +19,8 @@
 -- @provides
 --   json.lua
 -- @changelog
+--   v1.8
+--     + Auto-detect scripts in same folder
 --   v1.7 (2026-03-31)
 --     + Finalized for ReaPack release
 
@@ -44,10 +46,12 @@ local TOOLBAR_SEC, TOOLBAR_CMD   -- set in Init(); used for toolbar toggle highl
 -- ============================================================================
 -- PATHS
 -- ============================================================================
-local SEP      = package.config:sub(1, 1)
-local BASE_DIR = ({reaper.get_action_context()})[2]:match("^(.*[/\\])")
-local REF_DIR  = BASE_DIR .. ".." .. SEP .. "Reference" .. SEP
-local USER_DIR = reaper.GetResourcePath():gsub("\\", "/") .. "/Scripts/"
+local SEP         = package.config:sub(1, 1)
+local _script_path = ({reaper.get_action_context()})[2]
+local BASE_DIR    = _script_path:match("^(.*[/\\])")
+local SELF_NAME   = (_script_path:match("[^/\\]+$") or ""):lower()
+local REF_DIR     = BASE_DIR .. ".." .. SEP .. "Reference" .. SEP
+local USER_DIR    = reaper.GetResourcePath():gsub("\\", "/") .. "/Scripts/"
 
 -- JSON library (json.lua lives alongside this script)
 -- Append BASE_DIR to package.path so require('json') finds it.
@@ -70,63 +74,57 @@ local INFO_H      = 72    -- fixed height of the 3-row info strip at bottom
 local MIN_BTN_W   = 145   -- minimum button width for adaptive column count
 
 -- ============================================================================
--- BUTTON DATA  (hardcoded fallback — overridden by cc_buttons.json if present)
+-- BUTTON DATA  (built-in default layout — overridden by cc_buttons.json if present)
 -- ============================================================================
 -- SECTIONS: visual groups rendered in order as SeparatorText headers.
 local SECTIONS = {
-  { id = "personal",  label = "Personal"  },
-  { id = "community", label = "Community" },
+  { id = "default", label = "Default" },
 }
 
 -- BUTTONS: each entry targets one section.
---   script    = path relative to BASE_DIR  (Anshul's own scripts)
---   ref       = filename inside REF_DIR    (community Reference scripts — resolved at load)
---   path      = absolute path              (anything else)
---   action_id = integer                    (native REAPER action — 100% stable)
+--   script    = filename relative to BASE_DIR    (script in same folder as CC)
+--   user      = path relative to USER_DIR        (any script in REAPER Scripts folder)
+--   ref       = filename inside REF_DIR          (community Reference folder scripts)
+--   path      = absolute path                    (anything else)
+--   action_id = integer or named command ID      (native REAPER action)
 --   tooltip   = hover text
 local BUTTONS = {
 
-  -- ── Personal ─────────────────────────────────────────────────────────────
-  { sec="personal", label="Extract Tempo Map",
+  { sec="default", label="ReaDashboard",
+    user   ="Anshul-ReaScripts/ReaDashboard/Anshul_ReaDashboard.lua",
+    tooltip="Modern project browser for REAPER — browse, search, filter, and manage all your projects" },
+
+  { sec="default", label="Extract Tempo Map (Audio)",
     script ="Anshul - Extract Tempo Map From Item.lua",
-    tooltip="Beat This! on selected audio item → build project tempo map" },
+    tooltip="Run Beat This! on the selected audio item to build the project tempo map" },
 
-  { sec="personal", label="Export Tempo Map",
+  { sec="default", label="Extract Tempo Map (Click)",
+    script ="Anshul - Extract Tempo Map (Click Track).lua",
+    tooltip="Fast transient grid anchoring for click tracks (mathematically rigorous)" },
+
+  { sec="default", label="Export Tempo Map",
     script ="Anshul - Export Tempo Map.lua",
-    tooltip="Save current project tempo map to CSV file" },
+    tooltip="Save the current project tempo map to a CSV file" },
 
-  { sec="personal", label="Import Tempo Map",
+  { sec="default", label="Import Tempo Map",
     script ="Anshul - Import Tempo Map.lua",
-    tooltip="Load tempo map from CSV into project" },
+    tooltip="Load a tempo map from a CSV file into the current project" },
 
-  { sec="personal", label="Fit Item to Tempo Map",
+  { sec="default", label="Fit Item to Tempo Map",
     script ="Anshul - Fit Item To Tempo Map.lua",
-    tooltip="Place stretch markers on video/audio item to match project tempo map" },
+    tooltip="Place stretch markers on a video/audio item to match the project tempo map" },
 
-  { sec="personal", label="Delete Tempo Markers",
+  { sec="default", label="Delete Tempo Markers",
     script ="Anshul - Delete All Tempo Map Markers.eel",
-    tooltip="Delete all tempo map markers from project" },
+    tooltip="Delete all tempo map markers from the current project" },
 
-  { sec="personal", label="Import Moises Stems",
+  { sec="default", label="Import Moises Stems",
     script ="Anshul - Import Moises Stems (ZIP).lua",
-    tooltip="Pick ZIP/archive → extract and import Moises stems into project" },
+    tooltip="Pick a ZIP archive or audio file to extract and import Moises stems into the project" },
 
-  -- ── Community ─────────────────────────────────────────────────────────────
-  { sec="community", label="Tempo Marker Manager",
-    ref    ="acendan_Tempo Marker Manager.lua",
-    tooltip="Logic Pro-style table view of all tempo markers (acendan)" },
-
-  { sec="community", label="Tempo Versions",
-    ref    ="mpl_Tempo versions.lua",
-    tooltip="Save and restore named tempo map versions (MPL)" },
-
-  { sec="community", label="Smart Time Sig",
-    ref    ="muorsic_Smart tempo and time signature changes.lua",
-    tooltip="Change time sig with correct partial measure + ripple handling (muorsic)" },
-
-  { sec="community", label="Round BPM",
-    ref    ="X-Raym_Round all tempo markers BPM.lua",
-    tooltip="Round all tempo marker BPM values to whole numbers (X-Raym)" },
+  { sec="default", label="Auto Align Items",
+    script ="Anshul - Auto Align Items.lua",
+    tooltip="MFCC cross-correlation time alignment for selected items (best for similar audio)" },
 }
 
 -- Resolve ref → path (REF_DIR is now known). Extracted as a function so both
@@ -142,6 +140,58 @@ local function resolve_refs(buttons)
 end
 
 resolve_refs(BUTTONS)
+
+-- ============================================================================
+-- AUTO-DETECT SCRIPTS
+-- Scans BASE_DIR for any .lua/.eel not already in the hardcoded BUTTONS table
+-- and appends them to the Default section. Reads @description from each file
+-- header for the tooltip. Only meaningful on fresh installs (no cc_buttons.json);
+-- if cc_buttons.json exists, LoadButtons() overrides BUTTONS entirely anyway.
+-- ============================================================================
+local function ScanBuiltinButtons()
+  -- Build a set of filenames already explicitly hardcoded (lowercased)
+  local covered = {}
+  for _, btn in ipairs(BUTTONS) do
+    if btn.script then covered[btn.script:lower()] = true end
+  end
+  covered[SELF_NAME]  = true   -- the CC script itself
+  covered["json.lua"] = true   -- JSON helper library
+
+  local idx = 0
+  repeat
+    local fname = reaper.EnumerateFiles(BASE_DIR, idx)
+    if fname then
+      local ext = fname:match("%.([^%.]+)$")
+      if ext and (ext:lower() == "lua" or ext:lower() == "eel") then
+        if not covered[fname:lower()] then
+          -- Read @description from file header (first 1 KB) for tooltip
+          local tip = nil
+          local fh = io.open((BASE_DIR .. fname):gsub("/", SEP), "r")
+          if fh then
+            local head = fh:read(1024)
+            fh:close()
+            if head then
+              tip = head:match("@description%s+([^\r\n]+)")
+              if tip then tip = tip:match("^%s*(.-)%s*$") end  -- trim
+            end
+          end
+          -- Derive button label: strip leading "Anshul - " prefix and file extension
+          local label = fname:match("^(.+)%.[^%.]+$") or fname
+          label = label:gsub("^Anshul%s*%-%s*", "")
+          BUTTONS[#BUTTONS + 1] = {
+            sec     = "default",
+            label   = label,
+            script  = fname,
+            tooltip = tip or nil,
+          }
+        end
+      end
+    end
+    idx = idx + 1
+  until not fname
+end
+
+ScanBuiltinButtons()
 
 -- ============================================================================
 -- JSON LAYOUT LOADER
