@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" commit="487c919b1158ff9bb6638b487c056d3421879af0">
+<index version="1" commit="487c919b1158ff9bb6638b487c056d3421879af0" name="Anshul-ReaScripts">
   <category name="ReaDashboard">
     <reapack name="Anshul_ReaDashboard.lua" type="script" desc="ReaDashboard">
       <metadata>
@@ -300,4 +300,23 @@ v1.0 (27 july 2022)  + Initial release]]></changelog>
       </version>
     </reapack>
   </category>
+  <metadata>
+    <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Anshul's REAPER Scripts\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 A collection of personal scripts for REAPER \u8212- built for my workflow as a guitarist learning and covering songs.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 What's Included\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\b ReaDashboard} \u8212- Modern project launcher built with ReaImGui. Browse, search, filter, and manage your REAPER projects with album art, custom tags, metadata, grid/list views, and keyboard navigation.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\b Workflow Scripts} \u8212- Tempo mapping (AI-powered beat detection from audio or click tracks), audio alignment via MFCC cross-correlation, tempo map import/export, video/audio stretching to match tempo, and Moises stem import with automatic track organization.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Quick Start\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 1.\tx360\tab In REAPER: {\f1 Extensions > ReaPack > Import repositories}\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 2.\tx360\tab Paste: {\f1 https://raw.githubusercontent.com/AnshulJ999/REAPER-ReaScripts/main/index.xml}\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 3.\tx360\tab Browse and install what you need\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Or download manually and place scripts in your REAPER Scripts folder.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 For full documentation, see the README files in the repository.\par}
+}
+]]></description>
+  </metadata>
 </index>
