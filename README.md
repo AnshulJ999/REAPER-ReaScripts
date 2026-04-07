@@ -14,7 +14,7 @@ Or manually download script files and load them into REAPER as you wish.
 
 ## ReaDashboard
 
-A modern project dashboard built with ReaImGui — browse, search, and manage your REAPER projects with album art, custom tags, metadata, filters, grid/list views, and much more.
+A modern project launcher built with ReaImGui — browse, search, and manage your REAPER projects with album art, custom tags, metadata, filters, grid/list views, and much more.
 
 → [Full documentation](ReaDashboard/README.md)
 
@@ -55,7 +55,7 @@ A set of workflow tools for tempo mapping, audio alignment, and stem management.
 
 All scripts were created for personal use and are provided as-is. The development process included AI assistance.
 
-Please file any issues if you find any bugs or have any suggestions.
+Please file an issue if you find any bugs or have any suggestions.
 
 ## Credits
 
