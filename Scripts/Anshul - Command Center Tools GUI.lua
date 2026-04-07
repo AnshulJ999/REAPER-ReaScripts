@@ -2,15 +2,16 @@
 -- @author Anshul
 -- @version 1.8
 -- @about
---   Floating control panel for quick access to custom REAPER scripts and community tools.
---   Features a button grid organized by sections, live project info strip, and customizable
---   button layout via cc_buttons.json.
+--   Floating control panel for quick access to custom scripts and tools.
+--   Features a single "Default" section with hardcoded scripts + auto-discovered scripts,
+--   a live project info strip, and fully customizable button layout via cc_buttons.json.
 --
---   **Button Types:**
---   - Personal scripts (Anshul's custom scripts in Scripts folder)
---   - Community scripts (Reference folder scripts)
---   - REAPER native actions (workflow actions like Phase Alignment)
---   - Workflow utilities (imported from elsewhere)
+--   **How it works:**
+--   - Hardcoded buttons: 9 core scripts (Extract Tempo Map, Import Moises Stems, etc.)
+--     + ReaDashboard from the sibling ReaDashboard/ folder
+--   - Auto-detected buttons: Any new .lua/.eel scripts in the Scripts folder are
+--     automatically discovered and added with tooltips from @description headers
+--   - Custom layout: Users can customize via the built-in editor → saves to cc_buttons.json
 --
 --   **Requirements:**
 --   - ReaImGui extension (install via Extensions > ReaPack)
@@ -20,7 +21,8 @@
 --   json.lua
 -- @changelog
 --   v1.8
---     + Auto-detect scripts in same folder
+--     + Auto-detect scripts in same folder (reads @description from file headers)
+--     + Simplified to single "Default" section with 9 hardcoded core scripts + ReaDashboard
 --   v1.7 (2026-03-31)
 --     + Finalized for ReaPack release
 

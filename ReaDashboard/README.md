@@ -14,8 +14,8 @@ This was built for my personal use and is optimized for my workflow: I'm a guita
 - **Grid & List Views** - Switch between a visual grid with album art or a detailed sortable table
 - **Search & Filters** - Full-text search across project names, artists, albums, tags, and more. Filter by string count, tuning, status, genre, favorites, and metadata coverage
 - **Custom Tags** - Tag projects with status (Learning, Complete, etc.), tuning, difficulty, strings, guitar, amp, and free-text notes
-- **Metadata Enrichment** - BPM, key, time signature, and duration extracted from project files
-- **Album Art** - Automatic album art display from local databases
+- **Metadata** - Can manually add all metadata tags. BPM and time signature are auto extracted from project files
+- **Album Art** - Place `cover.jpg`, `cover.png`, `folder.jpg`, `folder.png`, or `art.jpg` in your project folder to display as album art. If only one image is in a folder, it is auto-selected regardless of name.
 - **Keyboard Navigation** - Full keyboard support with arrow keys, Enter to open, and search history
 - **Theming** - Customizable accent colors, dark mode, window opacity, and corner rounding
 - **Export** - Export project lists as CSV, Markdown, or JSON
@@ -30,17 +30,17 @@ This was built for my personal use and is optimized for my workflow: I'm a guita
 
 ## Installation
 
-1. Install the required extensions above via ReaPack
-2. Place `Anshul_ReaDashboard.lua` in your REAPER Scripts folder
-3. In REAPER: `Actions > Show action list > Load ReaScript...` and select the file
-4. Assign a keyboard shortcut for quick access (recommended)
+1. **ReaPack (Recommended):** `Extensions > ReaPack > Import repositories` and paste `https://github.com/AnshulJ999/REAPER-ReaScripts/raw/main/index.xml`
+2. Browse packages, search for "ReaDashboard", and click Install
+3. Make sure you have the required extensions above installed via ReaPack
+4. Assign a keyboard shortcut for quick access (recommended) and set it up as a startup action
 
 ## First Launch
 
 1. Open Settings (the Settings tab at the top)
 2. Set **Projects Folder** to the root folder containing your `.rpp` files
 3. Adjust **Max Scan Depth** if your projects are nested deeper than the default
-4. Press **Shift+F5** (Hard Refresh) to scan and build the metadata cache
+4. Press **Shift+F5** (or Right-Click the Refresh button) to Hard Refresh. This scans the folder and builds the metadata cache. **Note:** You must Hard Refresh anytime you manually add new album art or externally edit tags.
 
 The **Recent** tab works immediately with no configuration - it reads directly from REAPER's recent projects list.
 
@@ -58,6 +58,14 @@ The **Recent** tab works immediately with no configuration - it reads directly f
 | `Ctrl+B` | Close the launcher |
 | `Ctrl+Tab` | Switch tabs |
 | `Ctrl+1,2,3,4` | Switch tabs |
+
+## FAQs
+
+### Will this script automatically fetch metadata and art for all my projects? 
+
+No, the script does not automatically fetch anything. For now, it requires you to manually set up metadata and tags yourself. 
+
+Automatic enrichment is possible via a complex integration with SyncLyrics and Spicetify.
 
 ## Known Limitations
 

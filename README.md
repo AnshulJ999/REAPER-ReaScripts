@@ -31,6 +31,7 @@ A set of workflow tools for tempo mapping, audio alignment, and stem management.
 
 | Script | What It Does |
 |---|---|
+| **Command Center GUI** | Floating toolbar for quick access to all my scripts |
 | **Extract Tempo Map (Audio)** | BeatThis! detection on drum/mixed stems → tempo markers |
 | **Extract Tempo Map (Click Track)** | Fast transient-based click track analysis |
 | **Auto Align Items** | Align two audio takes via MFCC cross-correlation |

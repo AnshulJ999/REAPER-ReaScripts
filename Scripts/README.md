@@ -11,7 +11,9 @@ Designed to complement **ReaDashboard** and support professional audio productio
 - **Video/Item Stretching** — Fit audio/video items to variable tempo maps via stretch markers
 - **Stem Separation Import** — Import Moises audio stems (drums, bass, vocals, etc.) with pre-organized tracks
 - **Tempo Map Export/Import** — Save and restore tempo maps as CSV for sharing or backup
-- **Command Center GUI** — Floating panel for quick access to all scripts and community tools
+- **Command Center GUI** — Floating panel for quick access to all scripts. Automatically detects new scripts in the folder, and supports custom grid layouts via `cc_buttons.json`.
+
+![Command Center GUI](images/command_center.png)
 
 ## Requirements
 
@@ -61,14 +63,15 @@ pip install BeatNet
 
 ## Installation
 
-### Option 1: ReaPack (When Available)
+### Option 1: ReaPack (Recommended)
 
-Once the scripts are published to a ReaPack repository, install directly:
+Install directly from my ReaPack repository:
 
-1. `Extensions > ReaPack > Browse packages`
-2. Search for the script name
-3. Click Install
-4. Scripts and Python companions auto-install together
+1. `Extensions > ReaPack > Import repositories`
+2. Paste: `https://github.com/AnshulJ999/REAPER-ReaScripts/raw/main/index.xml`
+3. `Extensions > ReaPack > Browse packages`
+4. Search for the script name and click Install
+5. Scripts and Python companions auto-install together
 
 ### Option 2: Manual Installation
 
@@ -85,16 +88,15 @@ Once the scripts are published to a ReaPack repository, install directly:
 
 | Script | What It Does | Key Dependencies | Learn |
 |---|---|---|---|
-| **Command Center GUI** | Floating toolbar for all scripts + live project info | ReaImGui, json.lua | Launch once, keep open |
+| **Command Center GUI** | Floating toolbar that auto-detects scripts. Supports `cc_buttons.json` custom layouts. | ReaImGui, json.lua | Launch once, keep open |
 | **Extract Tempo Map (Audio)** | Beat detection on drum/mixed stems → tempo markers | Python: Beat This! or BeatNet, FFmpeg, SWS | Advanced; AI-powered |
 | **Extract Tempo Map (Click Track)** | Fast click-track analysis using transient detection | SWS Extensions, Python (optional) | Medium; best for clicks |
 | **Auto Align Items** | Align 2 audio items via MFCC correlation | Python: audio-offset-finder, FFmpeg | Easy; ~95%+ similar audio only |
-| **Fit Item To Tempo Map** | Stretch markers on video/audio to match project tempo | Python: mido (if using MIDI mode) | Medium; 2 modes |
+| **Fit Item To Tempo Map** | Fit video/audio via calculated stretch markers. Includes **Transient Snapping** to mathematically fix video render latency. | Python: mido (if using MIDI mode), js_ReaScriptAPI | Medium; 2 modes |
 | **Export Tempo Map** | Save project tempo markers to CSV | js_ReaScriptAPI | Easy; one-click export |
 | **Import Tempo Map** | Load tempo markers from CSV | js_ReaScriptAPI | Easy; one-click import |
 | **Delete Tempo Markers** | Clear all tempo/time sig markers (with confirmation) | None | Easy; safe cleanup |
-| **Import Moises Stems (Folder)** | Import extracted Moises stems folder → organized tracks | js_ReaScriptAPI | Easy; folder picker |
-| **Import Moises Stems (Archive)** | Import Moises ZIP/7Z/RAR → extract & organize | js_ReaScriptAPI, Windows tar | Easy; archive auto-extract |
+| **Import Moises Stems (ZIP)** | Universal file picker. Select a ZIP/TAR archive OR any extracted audio stem to auto-import into organized tracks. | js_ReaScriptAPI, Windows tar | Easy; single click |
 
 ---
 
@@ -103,7 +105,7 @@ Once the scripts are published to a ReaPack repository, install directly:
 ### 1. Learn a Song (Full Tempo Mapping)
 
 1. **Get stems** — Use Moises.ai to separate drums/vocals/bass/guitar
-2. **Import stems** — Run "Import Moises Stems (ZIP)" or "(Folder)"
+2. **Import stems** — Run "Import Moises Stems (ZIP)" and pick the ZIP
 3. **Extract tempo** — Select drum stem → "Extract Tempo Map (Audio)" or "(Click Track)"
 4. **Review** — Phase 1: place markers, Phase 2: convert to tempo envelope
 5. **Fit video** — If you have a tab video, "Fit Item To Tempo Map" with its tempo map
