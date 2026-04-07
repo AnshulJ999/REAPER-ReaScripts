@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" commit="487c919b1158ff9bb6638b487c056d3421879af0" name="Anshul-ReaScripts">
+<index version="1" commit="83d77e39fd6eb414fd0e1b200e1ccffa60fae76c" name="Anshul-ReaScripts">
   <category name="ReaDashboard">
     <reapack name="Anshul_ReaDashboard.lua" type="script" desc="ReaDashboard">
       <metadata>
@@ -74,6 +74,14 @@
   + Finalized for ReaPack release]]></changelog>
         <source main="main">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/487c919b1158ff9bb6638b487c056d3421879af0/Scripts/Anshul%20-%20Command%20Center%20Tools%20GUI.lua</source>
         <source file="json.lua">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/487c919b1158ff9bb6638b487c056d3421879af0/Scripts/json.lua</source>
+      </version>
+      <version name="1.8" author="Anshul" time="2026-04-07T20:52:25Z">
+        <changelog><![CDATA[v1.8
+  + Auto-detect scripts in same folder
+v1.7 (2026-03-31)
+  + Finalized for ReaPack release]]></changelog>
+        <source main="main">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/83d77e39fd6eb414fd0e1b200e1ccffa60fae76c/Scripts/Anshul%20-%20Command%20Center%20Tools%20GUI.lua</source>
+        <source file="json.lua">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/83d77e39fd6eb414fd0e1b200e1ccffa60fae76c/Scripts/json.lua</source>
       </version>
     </reapack>
     <reapack name="Anshul - Delete All Tempo Map Markers.eel" type="script" desc="Delete all tempo markers">
