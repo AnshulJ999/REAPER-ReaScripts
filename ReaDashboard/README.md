@@ -4,6 +4,26 @@ A modern, feature-rich project dashboard for [REAPER](https://www.reaper.fm/), b
 
 Browse, search, filter, and manage your REAPER projects with album art, metadata, custom tags, and more.
 
+# Screenshots
+
+<div align="center">
+  <img src="../Screenshots/GridView.png" alt="Grid View"/><br>
+  <em>Grid View</em>
+</div>
+<br>
+
+<div align="center">
+  <img src="../Screenshots/ListView.png" alt="List View"/><br>
+  <em>List View</em>
+</div>
+<br>
+
+<div align="center">
+  <img src="../Screenshots/SettingsMenu.png" alt="Settings Menu"/><br>
+  <em>Settings Menu</em>
+</div>
+
+                            
 # Note
 
 This was built for my personal use and is optimized for my workflow: I'm a guitarist who learns/covers a lot of songs.
