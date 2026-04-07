@@ -63,7 +63,7 @@ The **Recent** tab works immediately with no configuration - it reads directly f
 
 ### Will this script automatically fetch metadata and art for all my projects? 
 
-No, the script does not automatically fetch anything. For now, it requires you to manually set up metadata and tags yourself. 
+No, the script does not automatically fetch metadata and art. For now, it requires you to manually set up metadata and tags yourself. The only thing it auto-fetches is project BPM and Time Signature.
 
 Automatic enrichment is possible via a complex integration with SyncLyrics and Spicetify.
 

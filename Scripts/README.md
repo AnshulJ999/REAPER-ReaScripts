@@ -44,11 +44,6 @@ Python 3.x is required. Install via [python.org](https://www.python.org).
 # Beat This! + align tools
 pip install torch tqdm einops soxr rotary-embedding-torch soundfile audio-offset-finder mido
 pip install https://github.com/CPJKU/beat_this/archive/main.zip
-
-# Or if you prefer BeatNet instead of Beat This!
-pip install torch librosa pyaudio
-pip install git+https://github.com/CPJKU/madmom
-pip install BeatNet
 ```
 
 > **CUDA Setup:** For GPU acceleration, install PyTorch from https://pytorch.org (match your CUDA version). Otherwise, CPU-only installs work but are slower.
