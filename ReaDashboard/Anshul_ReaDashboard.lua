@@ -1,5 +1,5 @@
 -- @description ReaDashboard
--- @version 1.0.0
+-- @version 1.0.1
 -- @author Anshul
 -- @credits solger (for ReaLauncher concept)
 -- @about
@@ -10,6 +10,13 @@
 --   - ReaImGui
 --   - SWS Extensions
 -- @changelog
+--   v1.0.1 (2026-04-09)
+--     + Bulk Tag Editor — edit tags across multiple selected projects at once
+--     + Configurable Primary Genres — customize genre list from Settings
+--     + Grid Card Tooltip Mode — show metadata fields as hover tooltip instead of on-card
+--     + Grid Card Fields — added Tuning and Transpose as optional card/tooltip fields
+--     + Grid Tooltip Delay — configurable hover delay for grid card tooltips
+--     + Configurable Grid Spacing — adjustable card spacing in Settings
 --   v1.0.0 (2026-04-06)
 --     + Initial release
 
@@ -53,7 +60,7 @@ local ImGui = require 'imgui' '0.10'
 -- ============================================================================
 
 local SCRIPT_NAME    = 'ReaDashboard'
-local SCRIPT_VERSION = '1.0.0'
+local SCRIPT_VERSION = '1.0.1'
 local EXT_SECTION    = 'ReaDashboard'
 
 local DEFAULT_W = 1050
@@ -363,6 +370,7 @@ local S = {
   font_size      = DEFAULT_FONT_SIZE,
   art_size       = DEFAULT_ART_SIZE,
   grid_card_size = DEFAULT_GRID_CARD_SIZE,
+  grid_spacing   = 8,
 
   -- Data lists
   filtered_projects = {},
@@ -438,6 +446,8 @@ local S = {
 
   -- Bulk tag clear confirmation
   confirm_bulk_clear_tag = nil,  -- { field = 'status'|'strings'|'tuning', projects = {...} }
+  bulk_tag_edit_projects = nil,  -- list of projects for bulk tag editor
+  bulk_tag_edit_pending = false, -- one-shot flag to open the modal
 
   -- Universal whitelist: projects here always show regardless of hidden/exclusion/dedupe
   whitelist            = {},  -- path → true
@@ -497,6 +507,13 @@ local S = {
   grid_show_genre      = false,
   grid_show_difficulty = false,
   grid_show_date       = false,
+  grid_show_as_tooltip = true,  -- ON: selected fields show in tooltip on hover; OFF: fields render on card
+  grid_show_tuning     = false,
+  grid_show_transpose  = false,
+  grid_tooltip_delay   = 0.0,   -- seconds (0.0 = instant)
+
+  -- Configurable primary genres (comma-separated)
+  custom_primary_genres = 'Djent,Prog,Metal,Rock,Pop,Blues,Indie,Jazz',
 
   -- Color theme
   accent_color  = 0x4A8FB8,  -- RGB (no alpha), default blue
@@ -558,6 +575,8 @@ local tag_edit = {
   guitar     = '',
   amp        = '',
   genre      = '',
+  genre_primary   = '',
+  genre_secondary = '',
   notes      = '',
   favorite   = false,
   bpmOverride = '',
@@ -568,6 +587,36 @@ local tag_edit = {
   timeSigOverride  = '',
   artOverride      = '',
 }
+
+-- Bulk tag editor state — mode per field: 0=Skip/Unchanged, 1=Set, 2=Clear
+local bulk_edit = {
+  strings_mode = 0, strings = '',
+  tuning_mode = 0, tuning = '',
+  transpose_mode = 0, transpose = '',
+  status_mode = 0, status = '',
+  difficulty_mode = 0, difficulty = '',
+  guitar_mode = 0, guitar = '',
+  amp_mode = 0, amp = '',
+  genre_mode = 0, genre_primary = '', genre_secondary = '',
+  notes_mode = 0, notes = '',
+  favorite_mode = 0, favorite = false,
+  bpmOverride_mode = 0, bpmOverride = '',
+  keyOverride_mode = 0, keyOverride = '',
+  albumOverride_mode = 0, albumOverride = '',
+  artistOverride_mode = 0, artistOverride = '',
+  titleOverride_mode = 0, titleOverride = '',
+  durationOverride_mode = 0, durationOverride = '',
+  timeSigOverride_mode = 0, timeSigOverride = '',
+  artOverride_mode = 0, artOverride = '',
+}
+
+local function ResetBulkEdit()
+  for k in pairs(bulk_edit) do
+    if k:match('_mode$') then bulk_edit[k] = 0
+    elseif k == 'favorite' then bulk_edit[k] = false
+    else bulk_edit[k] = '' end
+  end
+end
 
 -- ============================================================================
 -- DEBUG LOGGING
@@ -990,10 +1039,38 @@ local PRIMARY_GENRE_MAP = {
   ['post-rock']          = 'Indie',
   ['jazz']               = 'Jazz',
   ['fusion']             = 'Jazz',
+  ['pop']                = 'Pop',
+  ['synth-pop']          = 'Pop',
+  ['electropop']         = 'Pop',
+  ['blues']              = 'Blues',
+  ['delta blues']        = 'Blues',
+  ['chicago blues']      = 'Blues',
+  ['country blues']      = 'Blues',
 }
 
+-- Ordered list of primary genres for dropdowns and quick-set menus
+local PRIMARY_GENRES = { 'Djent', 'Prog', 'Metal', 'Rock', 'Pop', 'Blues', 'Indie', 'Jazz' }
+
 -- Genre filter dropdown options (index 1 = All; rest must match PRIMARY_GENRE_MAP values)
-local GENRE_FILTER_OPTIONS = { 'All', 'Djent', 'Prog', 'Metal', 'Rock', 'Indie', 'Jazz', 'Unset' }
+local GENRE_FILTER_OPTIONS = { 'All', 'Djent', 'Prog', 'Metal', 'Rock', 'Pop', 'Blues', 'Indie', 'Jazz', 'Unset' }
+
+-- Rebuild PRIMARY_GENRES and GENRE_FILTER_OPTIONS from S.custom_primary_genres string
+local function RebuildGenreLists()
+  -- Parse comma-separated, trim whitespace
+  local genres = {}
+  for g in S.custom_primary_genres:gmatch('[^,]+') do
+    local trimmed = g:match('^%s*(.-)%s*$')
+    if trimmed ~= '' then genres[#genres + 1] = trimmed end
+  end
+  -- Repopulate PRIMARY_GENRES in-place
+  for i = #PRIMARY_GENRES, 1, -1 do PRIMARY_GENRES[i] = nil end
+  for i, g in ipairs(genres) do PRIMARY_GENRES[i] = g end
+  -- Repopulate GENRE_FILTER_OPTIONS: All + genres + Unset
+  for i = #GENRE_FILTER_OPTIONS, 1, -1 do GENRE_FILTER_OPTIONS[i] = nil end
+  GENRE_FILTER_OPTIONS[1] = 'All'
+  for i, g in ipairs(genres) do GENRE_FILTER_OPTIONS[i + 1] = g end
+  GENRE_FILTER_OPTIONS[#GENRE_FILTER_OPTIONS + 1] = 'Unset'
+end
 
 -- Image cache: path -> ImGui image handle or false
 local image_cache = {}
@@ -3005,7 +3082,10 @@ local function RefreshFiltered()
   S.selected = {}
   if S.selected_idx > #S.filtered_projects then S.selected_idx = #S.filtered_projects end
   if S.selected_idx < 1 and #S.filtered_projects > 0 then S.selected_idx = 1 end
-  if S.selected_idx > 0 then S.selected[S.selected_idx] = true end
+  if S.selected_idx > 0 then 
+    S.selected[S.selected_idx] = true 
+    S.pending_focus_idx = S.selected_idx
+  end
 end
 
 -- ============================================================================
@@ -3026,18 +3106,21 @@ local function SelectOnly(i)
   S.selected = { [i] = true }
   S.selected_idx = i
   S.sel_anchor = i
+  S.pending_focus_idx = i
 end
 
 local function ToggleSelect(i)
   if S.selected[i] then S.selected[i] = nil else S.selected[i] = true end
   S.selected_idx = i
   S.sel_anchor = i
+  S.pending_focus_idx = i
 end
 
 local function SelectRange(from, to)
   local lo, hi = math.min(from, to), math.max(from, to)
   for idx = lo, hi do S.selected[idx] = true end
   S.selected_idx = to
+  S.pending_focus_idx = to
 end
 
 local function ClearSelection()
@@ -3590,6 +3673,7 @@ local function SaveState()
   Set('art_size',          S.art_size)
   Set('grid_cols',          S.grid_cols)
   -- Set('grid_card_size',    S.grid_card_size)  -- hidden: replaced by grid_cols
+  Set('grid_spacing',      S.grid_spacing)
   Set('grid_line_h',       S.grid_line_h)
   Set('grid_show_artist',     S.grid_show_artist and '1' or '0')
   Set('grid_show_bpm_key',   S.grid_show_bpm_key and '1' or '0')
@@ -3601,6 +3685,11 @@ local function SaveState()
   Set('grid_show_genre',     S.grid_show_genre and '1' or '0')
   Set('grid_show_difficulty', S.grid_show_difficulty and '1' or '0')
   Set('grid_show_date',      S.grid_show_date and '1' or '0')
+  Set('grid_show_as_tooltip', S.grid_show_as_tooltip and '1' or '0')
+  Set('grid_show_tuning',     S.grid_show_tuning and '1' or '0')
+  Set('grid_show_transpose',  S.grid_show_transpose and '1' or '0')
+  Set('grid_tooltip_delay',   tostring(S.grid_tooltip_delay))
+  Set('custom_primary_genres', S.custom_primary_genres)
   Set('accent_color',       S.accent_color)
   Set('theme_preset',       S.theme_preset)
   -- Appearance settings
@@ -3729,6 +3818,9 @@ local function LoadState()
   local gcols = G('grid_cols')
   if gcols ~= '' then S.grid_cols = tonumber(gcols) or 5 end
   S.grid_cols = math.max(2, math.min(10, S.grid_cols))
+  local gsp = G('grid_spacing')
+  if gsp ~= '' then S.grid_spacing = tonumber(gsp) or 8 end
+  S.grid_spacing = math.max(0, math.min(32, S.grid_spacing))
   -- Legacy: grid_card_size still loaded for potential future use
   local gcs = G('grid_card_size')
   if gcs ~= '' then S.grid_card_size = tonumber(gcs) or DEFAULT_GRID_CARD_SIZE end
@@ -3762,6 +3854,17 @@ local function LoadState()
   if gsdi ~= '' then S.grid_show_difficulty = (gsdi == '1') end
   local gsdt = G('grid_show_date')
   if gsdt ~= '' then S.grid_show_date = (gsdt == '1') end
+  local gstt = G('grid_show_as_tooltip')
+  if gstt ~= '' then S.grid_show_as_tooltip = (gstt == '1') end
+  local gstn = G('grid_show_tuning')
+  if gstn ~= '' then S.grid_show_tuning = (gstn == '1') end
+  local gstp = G('grid_show_transpose')
+  if gstp ~= '' then S.grid_show_transpose = (gstp == '1') end
+  local gtd = G('grid_tooltip_delay')
+  if gtd ~= '' then S.grid_tooltip_delay = tonumber(gtd) or 0.0 end
+  local cpg = G('custom_primary_genres')
+  if cpg ~= '' then S.custom_primary_genres = cpg end
+  RebuildGenreLists()
 
   -- Accent color / theme preset
   local ac = G('accent_color')
@@ -4503,6 +4606,7 @@ local function SerializeTagEdit()
   return table.concat({
     tag_edit.strings, tag_edit.tuning, tag_edit.transpose, tag_edit.status,
     tag_edit.difficulty, tag_edit.guitar, tag_edit.amp, tag_edit.genre,
+    tag_edit.genre_primary or '', tag_edit.genre_secondary or '',
     tag_edit.notes, tostring(tag_edit.favorite), tag_edit.bpmOverride,
     tag_edit.keyOverride, tag_edit.albumOverride, tag_edit.artistOverride,
     tag_edit.titleOverride, tag_edit.durationOverride, tag_edit.timeSigOverride,
@@ -4586,6 +4690,66 @@ local function DrawContextMenu(proj, idx)
         end
         ImGui.EndMenu(ctx)
       end
+      if ImGui.BeginMenu(ctx, 'Set Transpose') then
+        for _, t in ipairs(TRANSPOSE_PRESETS) do
+          if ImGui.Selectable(ctx, t .. '##btp', false) then
+            for _, p in ipairs(GetSelectedProjects()) do
+              SetTag(p.path, 'transpose', t)
+              p.tags = GetTags(p.path)
+            end
+            SaveTags()
+          end
+        end
+        ImGui.Separator(ctx)
+        if ImGui.Selectable(ctx, 'Clear##btp_clr', false) then
+          S.confirm_bulk_clear_tag = { field = 'transpose', projects = GetSelectedProjects() }
+        end
+        ImGui.EndMenu(ctx)
+      end
+      if ImGui.BeginMenu(ctx, 'Set Genre') then
+        for _, g in ipairs(PRIMARY_GENRES) do
+          if ImGui.Selectable(ctx, g .. '##bgn', false) then
+            for _, p in ipairs(GetSelectedProjects()) do
+              local t = GetTags(p.path)
+              -- Set as primary genre (index 1), preserve secondary genres
+              local existing = t.genre
+              local secondary = {}
+              if type(existing) == 'table' then
+                for j = 2, #existing do secondary[#secondary + 1] = existing[j] end
+              elseif type(existing) == 'string' and existing ~= '' then
+                -- Legacy comma-separated string: extract secondary parts
+                local first = true
+                for part in existing:gmatch('[^,]+') do
+                  if first then first = false
+                  else
+                    local trimmed = part:match('^%s*(.-)%s*$')
+                    if trimmed ~= '' then secondary[#secondary + 1] = trimmed end
+                  end
+                end
+              end
+              local new_genre = { g }
+              for _, s in ipairs(secondary) do new_genre[#new_genre + 1] = s end
+              SetTag(p.path, 'genre', #new_genre == 1 and g or new_genre)
+              p.tags = GetTags(p.path)
+              if p.search_haystack then p.search_haystack = nil end
+            end
+            SaveTags()
+          end
+        end
+        ImGui.Separator(ctx)
+        if ImGui.Selectable(ctx, 'Clear##bgn_clr', false) then
+          S.confirm_bulk_clear_tag = { field = 'genre', projects = GetSelectedProjects() }
+        end
+        ImGui.EndMenu(ctx)
+      end
+
+      -- Bulk tag editor
+      ImGui.Separator(ctx)
+      if ImGui.Selectable(ctx, 'Bulk Edit Tags...', false) then
+        S.bulk_tag_edit_projects = GetSelectedProjects()
+        ResetBulkEdit()
+        S.bulk_tag_edit_pending = true
+      end
 
       -- Bulk copy
       ImGui.Separator(ctx)
@@ -4641,6 +4805,21 @@ local function DrawContextMenu(proj, idx)
         tag_edit.difficulty  = t.difficulty or ''
         tag_edit.guitar     = t.guitar or ''
         tag_edit.amp        = t.amp or ''
+        -- Split genre into primary (first item) and secondary (rest, comma-separated)
+        if type(t.genre) == 'table' then
+          tag_edit.genre_primary = t.genre[1] or ''
+          local sec = {}
+          for j = 2, #t.genre do sec[#sec + 1] = t.genre[j] end
+          tag_edit.genre_secondary = table.concat(sec, ', ')
+        elseif type(t.genre) == 'string' and t.genre ~= '' then
+          local first = t.genre:match('^([^,]+)')
+          tag_edit.genre_primary = first and first:match('^%s*(.-)%s*$') or t.genre
+          local rest = t.genre:match(',(.+)$')
+          tag_edit.genre_secondary = rest and rest:match('^%s*(.-)%s*$') or ''
+        else
+          tag_edit.genre_primary = ''
+          tag_edit.genre_secondary = ''
+        end
         tag_edit.genre      = GenreStr(t.genre)
         tag_edit.notes      = t.notes or ''
         tag_edit.favorite   = t.favorite or false
@@ -4712,6 +4891,65 @@ local function DrawContextMenu(proj, idx)
           if ImGui.Selectable(ctx, 'Clear##stn_clr', false) then
             SetTag(proj.path, 'tuning', nil)
             proj.tags = GetTags(proj.path)
+            SaveTags()
+          end
+        end
+        ImGui.EndMenu(ctx)
+      end
+      if ImGui.BeginMenu(ctx, 'Set Transpose##single') then
+        local cur_tp = tags.transpose or ''
+        for _, t in ipairs(TRANSPOSE_PRESETS) do
+          local is_current = (cur_tp == t)
+          if ImGui.Selectable(ctx, (is_current and '> ' or '') .. t .. '##stp', is_current) then
+            SetTag(proj.path, 'transpose', t)
+            proj.tags = GetTags(proj.path)
+            SaveTags()
+          end
+        end
+        if cur_tp ~= '' then
+          ImGui.Separator(ctx)
+          if ImGui.Selectable(ctx, 'Clear##stp_clr', false) then
+            SetTag(proj.path, 'transpose', nil)
+            proj.tags = GetTags(proj.path)
+            SaveTags()
+          end
+        end
+        ImGui.EndMenu(ctx)
+      end
+      if ImGui.BeginMenu(ctx, 'Set Genre##single') then
+        local cur_genre = GetPrimaryGenre(tags) or ''
+        for _, g in ipairs(PRIMARY_GENRES) do
+          local is_current = (cur_genre == g)
+          if ImGui.Selectable(ctx, (is_current and '> ' or '') .. g .. '##sgn', is_current) then
+            -- Set as primary genre, preserve secondary genres
+            local existing = tags.genre
+            local secondary = {}
+            if type(existing) == 'table' then
+              for j = 2, #existing do secondary[#secondary + 1] = existing[j] end
+            elseif type(existing) == 'string' and existing ~= '' then
+              local first = true
+              for part in existing:gmatch('[^,]+') do
+                if first then first = false
+                else
+                  local trimmed = part:match('^%s*(.-)%s*$')
+                  if trimmed ~= '' then secondary[#secondary + 1] = trimmed end
+                end
+              end
+            end
+            local new_genre = { g }
+            for _, s in ipairs(secondary) do new_genre[#new_genre + 1] = s end
+            SetTag(proj.path, 'genre', #new_genre == 1 and g or new_genre)
+            proj.tags = GetTags(proj.path)
+            if proj.search_haystack then proj.search_haystack = nil end
+            SaveTags()
+          end
+        end
+        if cur_genre ~= '' then
+          ImGui.Separator(ctx)
+          if ImGui.Selectable(ctx, 'Clear##sgn_clr', false) then
+            SetTag(proj.path, 'genre', nil)
+            proj.tags = GetTags(proj.path)
+            if proj.search_haystack then proj.search_haystack = nil end
             SaveTags()
           end
         end
@@ -4927,12 +5165,27 @@ local function DrawTagEditor()
   ImGui.SetNextItemWidth(ctx, -1)
   _, tag_edit.amp = ImGui.InputText(ctx, '##ed_amp', tag_edit.amp)
 
-  -- Genre (text)
+  -- Genre (primary dropdown + secondary freeform)
   ImGui.AlignTextToFramePadding(ctx)
   ImGui.Text(ctx, 'Genre:')
   ImGui.SameLine(ctx, lbl_w)
   ImGui.SetNextItemWidth(ctx, -1)
-  _, tag_edit.genre = ImGui.InputText(ctx, '##ed_genre', tag_edit.genre)
+  local genre_label = tag_edit.genre_primary ~= '' and tag_edit.genre_primary or '(none)'
+  if ImGui.BeginCombo(ctx, '##ed_genre_primary', genre_label) then
+    if ImGui.Selectable(ctx, '(none)##gp', tag_edit.genre_primary == '') then tag_edit.genre_primary = '' end
+    for _, g in ipairs(PRIMARY_GENRES) do
+      if ImGui.Selectable(ctx, g .. '##gp', tag_edit.genre_primary == g) then tag_edit.genre_primary = g end
+    end
+    ImGui.EndCombo(ctx)
+  end
+  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Primary genre') end
+  -- Secondary genres (freeform, comma-separated)
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Sub-Genre:')
+  ImGui.SameLine(ctx, lbl_w)
+  ImGui.SetNextItemWidth(ctx, -1)
+  _, tag_edit.genre_secondary = ImGui.InputText(ctx, '##ed_genre_secondary', tag_edit.genre_secondary)
+  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Additional genres, comma-separated (optional)') end
 
   -- Difficulty
   ImGui.AlignTextToFramePadding(ctx)
@@ -5073,7 +5326,19 @@ local function DrawTagEditor()
     tags.difficulty  = tag_edit.difficulty ~= '' and tag_edit.difficulty or nil
     tags.guitar     = tag_edit.guitar ~= '' and tag_edit.guitar or nil
     tags.amp        = tag_edit.amp ~= '' and tag_edit.amp or nil
-    tags.genre      = tag_edit.genre ~= '' and tag_edit.genre or nil
+    -- Reconstruct genre from primary + secondary
+    local save_genre = nil
+    if tag_edit.genre_primary ~= '' then
+      local genre_arr = { tag_edit.genre_primary }
+      if tag_edit.genre_secondary ~= '' then
+        for part in tag_edit.genre_secondary:gmatch('[^,]+') do
+          local trimmed = part:match('^%s*(.-)%s*$')
+          if trimmed ~= '' then genre_arr[#genre_arr + 1] = trimmed end
+        end
+      end
+      save_genre = #genre_arr == 1 and genre_arr[1] or genre_arr
+    end
+    tags.genre      = save_genre
     tags.notes      = tag_edit.notes ~= '' and tag_edit.notes or nil
     tags.bpmOverride = tag_edit.bpmOverride ~= '' and tonumber(tag_edit.bpmOverride) or nil
     tags.keyOverride = tag_edit.keyOverride ~= '' and tag_edit.keyOverride or nil
@@ -5120,7 +5385,6 @@ local function DrawTagEditor()
 
     SaveTags()
     BuildSearchHaystack(S.tag_edit_proj)
-    RefreshFiltered()
     ImGui.CloseCurrentPopup(ctx)
   end
 
@@ -5139,6 +5403,452 @@ local function DrawTagEditor()
   end
 
   if not open then
+    ImGui.CloseCurrentPopup(ctx)
+  end
+
+  ImGui.EndPopup(ctx)
+end
+
+-- ============================================================================
+-- UI — BULK TAG EDITOR (modal popup)
+-- ============================================================================
+
+-- Helper: draw a tri-state mode selector (Unchanged / Set / Clear) and return new mode
+local function BulkModeSelector(field_id, mode)
+  ImGui.PushID(ctx, field_id)
+  local new_mode = mode
+  if ImGui.RadioButton(ctx, 'Skip', mode == 0) then new_mode = 0 end
+  ImGui.SameLine(ctx)
+  if ImGui.RadioButton(ctx, 'Set', mode == 1) then new_mode = 1 end
+  ImGui.SameLine(ctx)
+  if ImGui.RadioButton(ctx, 'Clear', mode == 2) then new_mode = 2 end
+  ImGui.PopID(ctx)
+  return new_mode
+end
+
+local function DrawBulkTagEditor()
+  ImGui.SetNextWindowSize(ctx, 520, 620, ImGui.Cond_Appearing)
+  local visible, open = ImGui.BeginPopupModal(ctx, 'Bulk Edit Tags##bulk_modal', true, 0)
+  if not visible then return end
+
+  if not S.bulk_tag_edit_projects or #S.bulk_tag_edit_projects == 0 then
+    ImGui.EndPopup(ctx)
+    return
+  end
+
+  local count = #S.bulk_tag_edit_projects
+  ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.accent)
+  ImGui.Text(ctx, 'Editing ' .. count .. ' projects')
+  ImGui.PopStyleColor(ctx, 1)
+
+  ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
+  ImGui.TextWrapped(ctx, 'Skip = leave unchanged, Set = apply value, Clear = remove field')
+  ImGui.PopStyleColor(ctx, 1)
+  ImGui.Separator(ctx)
+  ImGui.Spacing(ctx)
+
+  local lbl_w = 110
+  local mode_w = 200  -- approximate width for mode radio buttons
+
+  -- Scrollable field area
+  local _, avail_y = ImGui.GetContentRegionAvail(ctx)
+  local fields_h = math.max(200, avail_y - 50)  -- reserve for buttons
+
+  if ImGui.BeginChild(ctx, 'bulk_fields_scroll', -1, fields_h) then
+
+  -- === Strings ===
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Strings:')
+  ImGui.SameLine(ctx, lbl_w)
+  bulk_edit.strings_mode = BulkModeSelector('bk_strings', bulk_edit.strings_mode)
+  if bulk_edit.strings_mode == 1 then
+    ImGui.Text(ctx, '')
+    ImGui.SameLine(ctx, lbl_w)
+    local s6 = (bulk_edit.strings == '6')
+    local s7 = (bulk_edit.strings == '7')
+    local s8 = (bulk_edit.strings == '8')
+    if ImGui.RadioButton(ctx, '6##bstr', s6) then bulk_edit.strings = '6' end
+    ImGui.SameLine(ctx)
+    if ImGui.RadioButton(ctx, '7##bstr', s7) then bulk_edit.strings = '7' end
+    ImGui.SameLine(ctx)
+    if ImGui.RadioButton(ctx, '8##bstr', s8) then bulk_edit.strings = '8' end
+  end
+  ImGui.Spacing(ctx)
+
+  -- === Status ===
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Status:')
+  ImGui.SameLine(ctx, lbl_w)
+  bulk_edit.status_mode = BulkModeSelector('bk_status', bulk_edit.status_mode)
+  if bulk_edit.status_mode == 1 then
+    ImGui.Text(ctx, '')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, -1)
+    local st_label = bulk_edit.status ~= '' and bulk_edit.status or '(select)'
+    if ImGui.BeginCombo(ctx, '##bk_status_val', st_label) then
+      for _, s in ipairs(STATUS_PRESETS) do
+        if ImGui.Selectable(ctx, s .. '##bkst', bulk_edit.status == s) then bulk_edit.status = s end
+      end
+      ImGui.EndCombo(ctx)
+    end
+  end
+  ImGui.Spacing(ctx)
+
+  -- === Tuning ===
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Tuning:')
+  ImGui.SameLine(ctx, lbl_w)
+  bulk_edit.tuning_mode = BulkModeSelector('bk_tuning', bulk_edit.tuning_mode)
+  if bulk_edit.tuning_mode == 1 then
+    ImGui.Text(ctx, '')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, -1)
+    local tn_label = bulk_edit.tuning ~= '' and bulk_edit.tuning or '(select)'
+    if ImGui.BeginCombo(ctx, '##bk_tuning_val', tn_label) then
+      for _, t in ipairs(TUNING_PRESETS) do
+        if ImGui.Selectable(ctx, t .. '##bktn', bulk_edit.tuning == t) then bulk_edit.tuning = t end
+      end
+      ImGui.EndCombo(ctx)
+    end
+  end
+  ImGui.Spacing(ctx)
+
+  -- === Transpose ===
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Transpose:')
+  ImGui.SameLine(ctx, lbl_w)
+  bulk_edit.transpose_mode = BulkModeSelector('bk_transpose', bulk_edit.transpose_mode)
+  if bulk_edit.transpose_mode == 1 then
+    ImGui.Text(ctx, '')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, -1)
+    local tp_label = bulk_edit.transpose ~= '' and bulk_edit.transpose or '(select)'
+    if ImGui.BeginCombo(ctx, '##bk_transpose_val', tp_label) then
+      for _, t in ipairs(TRANSPOSE_PRESETS) do
+        if ImGui.Selectable(ctx, t .. '##bktp', bulk_edit.transpose == t) then bulk_edit.transpose = t end
+      end
+      ImGui.EndCombo(ctx)
+    end
+  end
+  ImGui.Spacing(ctx)
+
+  -- === Difficulty ===
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Difficulty:')
+  ImGui.SameLine(ctx, lbl_w)
+  bulk_edit.difficulty_mode = BulkModeSelector('bk_difficulty', bulk_edit.difficulty_mode)
+  if bulk_edit.difficulty_mode == 1 then
+    ImGui.Text(ctx, '')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, -1)
+    local df_label = bulk_edit.difficulty ~= '' and bulk_edit.difficulty or '(select)'
+    if ImGui.BeginCombo(ctx, '##bk_diff_val', df_label) then
+      for _, d in ipairs(DIFFICULTY_PRESETS) do
+        if ImGui.Selectable(ctx, d .. '##bkdf', bulk_edit.difficulty == d) then bulk_edit.difficulty = d end
+      end
+      ImGui.EndCombo(ctx)
+    end
+  end
+  ImGui.Spacing(ctx)
+
+  -- === Guitar ===
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Guitar:')
+  ImGui.SameLine(ctx, lbl_w)
+  bulk_edit.guitar_mode = BulkModeSelector('bk_guitar', bulk_edit.guitar_mode)
+  if bulk_edit.guitar_mode == 1 then
+    ImGui.Text(ctx, '')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, -1)
+    local gt_label = bulk_edit.guitar ~= '' and bulk_edit.guitar or '(select)'
+    if ImGui.BeginCombo(ctx, '##bk_guitar_val', gt_label) then
+      for _, g in ipairs(GUITAR_PRESETS) do
+        if g == 'Custom' then
+          ImGui.Separator(ctx)
+          if ImGui.Selectable(ctx, 'Custom...##bkgt', false) then bulk_edit.guitar = 'Custom' end
+        else
+          if ImGui.Selectable(ctx, g .. '##bkgt', bulk_edit.guitar == g) then bulk_edit.guitar = g end
+        end
+      end
+      ImGui.EndCombo(ctx)
+    end
+    -- Custom guitar input
+    local is_preset = false
+    for _, g in ipairs(GUITAR_PRESETS) do
+      if g ~= 'Custom' and bulk_edit.guitar == g then is_preset = true; break end
+    end
+    if bulk_edit.guitar ~= '' and not is_preset then
+      ImGui.Text(ctx, '')
+      ImGui.SameLine(ctx, lbl_w)
+      ImGui.SetNextItemWidth(ctx, -1)
+      _, bulk_edit.guitar = ImGui.InputText(ctx, '##bk_guitar_custom', bulk_edit.guitar)
+    end
+  end
+  ImGui.Spacing(ctx)
+
+  -- === Amp/Plugin ===
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Amp/Plugin:')
+  ImGui.SameLine(ctx, lbl_w)
+  bulk_edit.amp_mode = BulkModeSelector('bk_amp', bulk_edit.amp_mode)
+  if bulk_edit.amp_mode == 1 then
+    ImGui.Text(ctx, '')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, -1)
+    _, bulk_edit.amp = ImGui.InputText(ctx, '##bk_amp_val', bulk_edit.amp)
+  end
+  ImGui.Spacing(ctx)
+
+  -- === Genre ===
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Genre:')
+  ImGui.SameLine(ctx, lbl_w)
+  bulk_edit.genre_mode = BulkModeSelector('bk_genre', bulk_edit.genre_mode)
+  if bulk_edit.genre_mode == 1 then
+    ImGui.Text(ctx, '')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, -1)
+    local gp_label = bulk_edit.genre_primary ~= '' and bulk_edit.genre_primary or '(select)'
+    if ImGui.BeginCombo(ctx, '##bk_genre_primary', gp_label) then
+      for _, g in ipairs(PRIMARY_GENRES) do
+        if ImGui.Selectable(ctx, g .. '##bkgp', bulk_edit.genre_primary == g) then bulk_edit.genre_primary = g end
+      end
+      ImGui.EndCombo(ctx)
+    end
+    ImGui.Text(ctx, 'Sub-Genre:')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, -1)
+    _, bulk_edit.genre_secondary = ImGui.InputText(ctx, '##bk_genre_secondary', bulk_edit.genre_secondary)
+  end
+  ImGui.Spacing(ctx)
+
+  -- === Favorite ===
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Favorite:')
+  ImGui.SameLine(ctx, lbl_w)
+  bulk_edit.favorite_mode = BulkModeSelector('bk_fav', bulk_edit.favorite_mode)
+  if bulk_edit.favorite_mode == 1 then
+    ImGui.Text(ctx, '')
+    ImGui.SameLine(ctx, lbl_w)
+    _, bulk_edit.favorite = ImGui.Checkbox(ctx, 'Mark as favorite##bk_fav', bulk_edit.favorite)
+  end
+
+  ImGui.Spacing(ctx)
+  ImGui.Separator(ctx)
+  ImGui.Spacing(ctx)
+
+  -- Metadata overrides section
+  ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
+  ImGui.Text(ctx, 'Metadata Overrides')
+  ImGui.PopStyleColor(ctx, 1)
+  ImGui.Spacing(ctx)
+
+  -- === BPM Override ===
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'BPM:')
+  ImGui.SameLine(ctx, lbl_w)
+  bulk_edit.bpmOverride_mode = BulkModeSelector('bk_bpm', bulk_edit.bpmOverride_mode)
+  if bulk_edit.bpmOverride_mode == 1 then
+    ImGui.Text(ctx, '')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, -1)
+    _, bulk_edit.bpmOverride = ImGui.InputText(ctx, '##bk_bpm_val', bulk_edit.bpmOverride)
+  end
+  ImGui.Spacing(ctx)
+
+  -- === Key Override ===
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Key:')
+  ImGui.SameLine(ctx, lbl_w)
+  bulk_edit.keyOverride_mode = BulkModeSelector('bk_key', bulk_edit.keyOverride_mode)
+  if bulk_edit.keyOverride_mode == 1 then
+    ImGui.Text(ctx, '')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, -1)
+    _, bulk_edit.keyOverride = ImGui.InputText(ctx, '##bk_key_val', bulk_edit.keyOverride)
+  end
+  ImGui.Spacing(ctx)
+
+  -- === Album Override ===
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Album:')
+  ImGui.SameLine(ctx, lbl_w)
+  bulk_edit.albumOverride_mode = BulkModeSelector('bk_album', bulk_edit.albumOverride_mode)
+  if bulk_edit.albumOverride_mode == 1 then
+    ImGui.Text(ctx, '')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, -1)
+    _, bulk_edit.albumOverride = ImGui.InputText(ctx, '##bk_album_val', bulk_edit.albumOverride)
+  end
+  ImGui.Spacing(ctx)
+
+  -- === Artist Override ===
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Artist:')
+  ImGui.SameLine(ctx, lbl_w)
+  bulk_edit.artistOverride_mode = BulkModeSelector('bk_artist', bulk_edit.artistOverride_mode)
+  if bulk_edit.artistOverride_mode == 1 then
+    ImGui.Text(ctx, '')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, -1)
+    _, bulk_edit.artistOverride = ImGui.InputText(ctx, '##bk_artist_val', bulk_edit.artistOverride)
+  end
+  ImGui.Spacing(ctx)
+
+  -- === Title Override ===
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Title:')
+  ImGui.SameLine(ctx, lbl_w)
+  bulk_edit.titleOverride_mode = BulkModeSelector('bk_title', bulk_edit.titleOverride_mode)
+  if bulk_edit.titleOverride_mode == 1 then
+    ImGui.Text(ctx, '')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, -1)
+    _, bulk_edit.titleOverride = ImGui.InputText(ctx, '##bk_title_val', bulk_edit.titleOverride)
+  end
+  ImGui.Spacing(ctx)
+
+  -- === Duration Override ===
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Duration (s):')
+  ImGui.SameLine(ctx, lbl_w)
+  bulk_edit.durationOverride_mode = BulkModeSelector('bk_dur', bulk_edit.durationOverride_mode)
+  if bulk_edit.durationOverride_mode == 1 then
+    ImGui.Text(ctx, '')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, -1)
+    _, bulk_edit.durationOverride = ImGui.InputText(ctx, '##bk_dur_val', bulk_edit.durationOverride)
+  end
+  ImGui.Spacing(ctx)
+
+  -- === Time Sig Override ===
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Time Sig:')
+  ImGui.SameLine(ctx, lbl_w)
+  bulk_edit.timeSigOverride_mode = BulkModeSelector('bk_tsig', bulk_edit.timeSigOverride_mode)
+  if bulk_edit.timeSigOverride_mode == 1 then
+    ImGui.Text(ctx, '')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, -1)
+    _, bulk_edit.timeSigOverride = ImGui.InputText(ctx, '##bk_tsig_val', bulk_edit.timeSigOverride)
+  end
+  ImGui.Spacing(ctx)
+
+  -- === Art Override ===
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Art path:')
+  ImGui.SameLine(ctx, lbl_w)
+  bulk_edit.artOverride_mode = BulkModeSelector('bk_art', bulk_edit.artOverride_mode)
+  if bulk_edit.artOverride_mode == 1 then
+    ImGui.Text(ctx, '')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, -1)
+    _, bulk_edit.artOverride = ImGui.InputText(ctx, '##bk_art_val', bulk_edit.artOverride)
+  end
+
+  ImGui.Spacing(ctx)
+  ImGui.Separator(ctx)
+  ImGui.Spacing(ctx)
+
+  -- === Notes ===
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, 'Notes:')
+  ImGui.SameLine(ctx, lbl_w)
+  bulk_edit.notes_mode = BulkModeSelector('bk_notes', bulk_edit.notes_mode)
+  if bulk_edit.notes_mode == 1 then
+    ImGui.SetNextItemWidth(ctx, -1)
+    _, bulk_edit.notes = ImGui.InputTextMultiline(ctx, '##bk_notes_val', bulk_edit.notes, -1, 60)
+  end
+
+  ImGui.EndChild(ctx)
+  end -- if BeginChild
+
+  -- Count how many fields are being changed
+  local change_count = 0
+  for k in pairs(bulk_edit) do
+    if k:match('_mode$') and bulk_edit[k] ~= 0 then change_count = change_count + 1 end
+  end
+
+  -- Apply / Cancel buttons
+  local can_apply = change_count > 0
+  if not can_apply then ImGui.BeginDisabled(ctx) end
+  if ImGui.Button(ctx, 'Apply to ' .. count .. ' projects', 0, 0) then
+    -- Apply changes to all selected projects
+    for _, proj in ipairs(S.bulk_tag_edit_projects) do
+      local tags = GetTags(proj.path)
+      if next(tags) == nil then tags = {} end
+
+      -- Simple fields: set or clear
+      local simple_fields = {
+        { mode = 'strings_mode',   key = 'strings',    val = bulk_edit.strings ~= '' and tonumber(bulk_edit.strings) or nil },
+        { mode = 'status_mode',    key = 'status',     val = bulk_edit.status ~= '' and bulk_edit.status or nil },
+        { mode = 'tuning_mode',    key = 'tuning',     val = bulk_edit.tuning ~= '' and bulk_edit.tuning or nil },
+        { mode = 'transpose_mode', key = 'transpose',  val = bulk_edit.transpose ~= '' and bulk_edit.transpose or nil },
+        { mode = 'difficulty_mode', key = 'difficulty', val = bulk_edit.difficulty ~= '' and bulk_edit.difficulty or nil },
+        { mode = 'guitar_mode',    key = 'guitar',     val = bulk_edit.guitar ~= '' and bulk_edit.guitar or nil },
+        { mode = 'amp_mode',       key = 'amp',        val = bulk_edit.amp ~= '' and bulk_edit.amp or nil },
+        { mode = 'notes_mode',     key = 'notes',      val = bulk_edit.notes ~= '' and bulk_edit.notes or nil },
+        { mode = 'bpmOverride_mode',  key = 'bpmOverride',  val = bulk_edit.bpmOverride ~= '' and tonumber(bulk_edit.bpmOverride) or nil },
+        { mode = 'keyOverride_mode',  key = 'keyOverride',  val = bulk_edit.keyOverride ~= '' and bulk_edit.keyOverride or nil },
+        { mode = 'albumOverride_mode', key = 'albumOverride', val = bulk_edit.albumOverride ~= '' and bulk_edit.albumOverride or nil },
+        { mode = 'artistOverride_mode', key = 'artistOverride', val = bulk_edit.artistOverride ~= '' and bulk_edit.artistOverride or nil },
+        { mode = 'titleOverride_mode',  key = 'titleOverride',  val = bulk_edit.titleOverride ~= '' and bulk_edit.titleOverride or nil },
+        { mode = 'durationOverride_mode', key = 'durationOverride', val = bulk_edit.durationOverride ~= '' and tonumber(bulk_edit.durationOverride) or nil },
+        { mode = 'timeSigOverride_mode', key = 'timeSigOverride', val = bulk_edit.timeSigOverride ~= '' and bulk_edit.timeSigOverride or nil },
+        { mode = 'artOverride_mode',     key = 'artOverride',     val = bulk_edit.artOverride ~= '' and bulk_edit.artOverride or nil },
+      }
+      for _, f in ipairs(simple_fields) do
+        if bulk_edit[f.mode] == 1 then tags[f.key] = f.val
+        elseif bulk_edit[f.mode] == 2 then tags[f.key] = nil end
+      end
+
+      -- Genre (compound field)
+      if bulk_edit.genre_mode == 1 then
+        if bulk_edit.genre_primary ~= '' then
+          local genre_arr = { bulk_edit.genre_primary }
+          if bulk_edit.genre_secondary ~= '' then
+            for part in bulk_edit.genre_secondary:gmatch('[^,]+') do
+              local trimmed = part:match('^%s*(.-)%s*$')
+              if trimmed ~= '' then genre_arr[#genre_arr + 1] = trimmed end
+            end
+          end
+          tags.genre = #genre_arr == 1 and genre_arr[1] or genre_arr
+        end
+      elseif bulk_edit.genre_mode == 2 then
+        tags.genre = nil
+      end
+
+      -- Favorite
+      if bulk_edit.favorite_mode == 1 then tags.favorite = bulk_edit.favorite
+      elseif bulk_edit.favorite_mode == 2 then tags.favorite = nil end
+
+      local tagKey = FindTagKey(proj.path)
+      project_tags[tagKey] = tags
+      proj.tags = tags
+      BuildSearchHaystack(proj)
+    end
+
+    SaveTags()
+    S.bulk_tag_edit_projects = nil
+    ImGui.CloseCurrentPopup(ctx)
+  end
+  if not can_apply then ImGui.EndDisabled(ctx) end
+
+  ImGui.SameLine(ctx)
+  if ImGui.Button(ctx, 'Cancel', 80, 0) then
+    S.bulk_tag_edit_projects = nil
+    ImGui.CloseCurrentPopup(ctx)
+  end
+
+  if change_count > 0 then
+    ImGui.SameLine(ctx)
+    ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
+    ImGui.Text(ctx, '  ' .. change_count .. ' field(s) will be modified')
+    ImGui.PopStyleColor(ctx, 1)
+  end
+
+  if not open then
+    S.bulk_tag_edit_projects = nil
     ImGui.CloseCurrentPopup(ctx)
   end
 
@@ -5286,6 +5996,11 @@ local function DrawProjectList()
 
     local sel_flags = ImGui.SelectableFlags_SpanAllColumns
                     | ImGui.SelectableFlags_AllowDoubleClick
+
+    if S.pending_focus_idx == i then
+      ImGui.SetKeyboardFocusHere(ctx, 0)
+      S.pending_focus_idx = nil
+    end
 
     if ImGui.Selectable(ctx, label .. '##row' .. i, IsSelected(i), sel_flags, 0, S.art_size) then
       if ImGui.IsMouseDoubleClicked(ctx, 0) then
@@ -5453,31 +6168,37 @@ end
 
 local function DrawGridView()
   -- Reserve height for action bar + status bar below
-  local avail_w, avail_y = ImGui.GetContentRegionAvail(ctx)
+  local avail_w_parent, avail_y = ImGui.GetContentRegionAvail(ctx)
   local list_h = avail_y - 72
 
-  local spacing = 8
+  if not ImGui.BeginChild(ctx, 'grid_view', 0, list_h, ImGui.ChildFlags_None, ImGui.WindowFlags_None) then
+    return
+  end
+
+  local avail_w = ImGui.GetContentRegionAvail(ctx) -- Child's true width (accounts for vertical scrollbar)
+  local spacing = S.grid_spacing or 8
   -- Compute card width dynamically from column count to fill available width
   local card_w = math.floor((avail_w - (S.grid_cols - 1) * spacing) / S.grid_cols)
   if card_w < 50 then card_w = 50 end  -- safety minimum
   -- Dynamic text height: count active lines (name always shown)
   local line_h = S.grid_line_h  -- configurable in Settings
-  local text_lines = 1  -- project name (always)
-  if S.grid_show_artist then text_lines = text_lines + 1 end
-  if S.grid_show_bpm_key then text_lines = text_lines + 1 end
-  if S.grid_show_status then text_lines = text_lines + 1 end
-  if S.grid_show_album then text_lines = text_lines + 1 end
-  if S.grid_show_genre then text_lines = text_lines + 1 end
-  if S.grid_show_duration then text_lines = text_lines + 1 end
-  if S.grid_show_strings then text_lines = text_lines + 1 end
-  if S.grid_show_difficulty then text_lines = text_lines + 1 end
-  if S.grid_show_date then text_lines = text_lines + 1 end
+  local text_lines = 2  -- project name (2 lines to accommodate wrapping)
+  if not S.grid_show_as_tooltip then
+    -- Only add field lines when rendering on card (not tooltip mode)
+    if S.grid_show_artist then text_lines = text_lines + 1 end
+    if S.grid_show_bpm_key then text_lines = text_lines + 1 end
+    if S.grid_show_status then text_lines = text_lines + 1 end
+    if S.grid_show_album then text_lines = text_lines + 1 end
+    if S.grid_show_genre then text_lines = text_lines + 1 end
+    if S.grid_show_duration then text_lines = text_lines + 1 end
+    if S.grid_show_strings then text_lines = text_lines + 1 end
+    if S.grid_show_difficulty then text_lines = text_lines + 1 end
+    if S.grid_show_date then text_lines = text_lines + 1 end
+    if S.grid_show_tuning then text_lines = text_lines + 1 end
+    if S.grid_show_transpose then text_lines = text_lines + 1 end
+  end
   local card_text_h = text_lines * line_h + 8  -- lines + padding
   local card_h = card_w + card_text_h
-
-  if not ImGui.BeginChild(ctx, 'grid_view', 0, list_h, ImGui.ChildFlags_None, ImGui.WindowFlags_None) then
-    return
-  end
 
   -- Empty state
   if #S.filtered_projects == 0 then
@@ -5537,6 +6258,11 @@ local function DrawGridView()
       ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive, C.selection)
     end
 
+    if S.pending_focus_idx == i then
+      ImGui.SetKeyboardFocusHere(ctx, 0)
+      S.pending_focus_idx = nil
+    end
+
     -- Invisible button covering full card area for click/double-click
     if ImGui.Button(ctx, '##card' .. i, card_w, card_h) then
       if ImGui.IsKeyDown(ctx, ImGui.Key_LeftCtrl) or ImGui.IsKeyDown(ctx, ImGui.Key_RightCtrl) then
@@ -5591,116 +6317,194 @@ local function DrawGridView()
     -- Text area below art (dynamic positioning based on active toggles)
     local cur_y = item_y + card_w + 2
     local pad_x = item_x + 4
-    local wrap_x = item_x + card_w - 4
+    local win_x, _ = ImGui.GetWindowPos(ctx)
+    local wrap_x = (item_x + card_w - 4) - win_x
 
-    -- Project name (always shown)
+    -- Project name (always shown, 2 lines allocated)
     ImGui.SetCursorScreenPos(ctx, pad_x, cur_y)
     ImGui.PushTextWrapPos(ctx, wrap_x)
     local displayName = proj.name
     if not proj.exists then displayName = displayName .. ' [!]' end
     ImGui.Text(ctx, displayName)
     ImGui.PopTextWrapPos(ctx)
-    cur_y = cur_y + line_h
+    -- Advance by actual rendered height (handles text wrapping properly)
+    local _, name_max_y = ImGui.GetItemRectMax(ctx)
+    cur_y = name_max_y + 1
 
-    -- Artist (optional)
-    if S.grid_show_artist then
-      local artist_display = proj.matchedArtist or proj.artist
-      if artist_display and artist_display ~= '' then
+    -- Card fields: rendered on card (tooltip OFF) or as hover tooltip (tooltip ON)
+    if not S.grid_show_as_tooltip then
+      -- Artist (optional)
+      if S.grid_show_artist then
+        local artist_display = proj.matchedArtist or proj.artist
+        if artist_display and artist_display ~= '' then
+          ImGui.SetCursorScreenPos(ctx, pad_x, cur_y)
+          ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
+          ImGui.PushTextWrapPos(ctx, wrap_x)
+          ImGui.Text(ctx, artist_display)
+          ImGui.PopTextWrapPos(ctx)
+          ImGui.PopStyleColor(ctx, 1)
+        end
+        cur_y = cur_y + line_h
+      end
+
+      -- BPM / Key (optional)
+      if S.grid_show_bpm_key then
+        local meta_parts = {}
+        if proj.displayBPM then meta_parts[#meta_parts + 1] = tostring(proj.displayBPM) end
+        if proj.displayKey then meta_parts[#meta_parts + 1] = proj.displayKey end
+        if #meta_parts > 0 then
+          ImGui.SetCursorScreenPos(ctx, pad_x, cur_y)
+          ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
+          ImGui.Text(ctx, table.concat(meta_parts, ' | '))
+          ImGui.PopStyleColor(ctx, 1)
+        end
+        cur_y = cur_y + line_h
+      end
+
+      -- Status badge (optional)
+      if S.grid_show_status and tags.status then
+        local sc = STATUS_COLORS[tags.status]
+        if sc then
+          ImGui.SetCursorScreenPos(ctx, pad_x, cur_y)
+          ImGui.PushStyleColor(ctx, ImGui.Col_Text, sc)
+          ImGui.Text(ctx, tags.status)
+          ImGui.PopStyleColor(ctx, 1)
+        end
+        cur_y = cur_y + line_h
+      end
+
+      -- Album (optional)
+      if S.grid_show_album and proj.album then
         ImGui.SetCursorScreenPos(ctx, pad_x, cur_y)
         ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
         ImGui.PushTextWrapPos(ctx, wrap_x)
-        ImGui.Text(ctx, artist_display)
+        ImGui.Text(ctx, proj.album)
         ImGui.PopTextWrapPos(ctx)
         ImGui.PopStyleColor(ctx, 1)
+        cur_y = cur_y + line_h
       end
-      cur_y = cur_y + line_h
-    end
 
-    -- BPM / Key (optional)
-    if S.grid_show_bpm_key then
-      local meta_parts = {}
-      if proj.displayBPM then meta_parts[#meta_parts + 1] = tostring(proj.displayBPM) end
-      if proj.displayKey then meta_parts[#meta_parts + 1] = proj.displayKey end
-      if #meta_parts > 0 then
+      -- Genre (optional)
+      if S.grid_show_genre and tags.genre then
         ImGui.SetCursorScreenPos(ctx, pad_x, cur_y)
         ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
-        ImGui.Text(ctx, table.concat(meta_parts, ' | '))
+        ImGui.Text(ctx, GenreStr(tags.genre))
         ImGui.PopStyleColor(ctx, 1)
+        cur_y = cur_y + line_h
       end
-      cur_y = cur_y + line_h
-    end
 
-    -- Status badge (optional)
-    if S.grid_show_status and tags.status then
-      local sc = STATUS_COLORS[tags.status]
-      if sc then
+      -- Duration (optional)
+      if S.grid_show_duration and proj.duration then
+        local mins = math.floor(proj.duration / 60)
+        local secs = math.floor(proj.duration % 60)
         ImGui.SetCursorScreenPos(ctx, pad_x, cur_y)
-        ImGui.PushStyleColor(ctx, ImGui.Col_Text, sc)
-        ImGui.Text(ctx, tags.status)
+        ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
+        ImGui.Text(ctx, string.format('%d:%02d', mins, secs))
         ImGui.PopStyleColor(ctx, 1)
+        cur_y = cur_y + line_h
       end
-      cur_y = cur_y + line_h
-    end
 
-    -- Album (optional)
-    if S.grid_show_album and proj.album then
-      ImGui.SetCursorScreenPos(ctx, pad_x, cur_y)
-      ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
-      ImGui.PushTextWrapPos(ctx, wrap_x)
-      ImGui.Text(ctx, proj.album)
-      ImGui.PopTextWrapPos(ctx)
-      ImGui.PopStyleColor(ctx, 1)
-      cur_y = cur_y + line_h
-    end
+      -- Strings (optional)
+      if S.grid_show_strings and tags.strings then
+        ImGui.SetCursorScreenPos(ctx, pad_x, cur_y)
+        ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
+        ImGui.Text(ctx, tags.strings .. '-string')
+        ImGui.PopStyleColor(ctx, 1)
+        cur_y = cur_y + line_h
+      end
 
-    -- Genre (optional)
-    if S.grid_show_genre and tags.genre then
-      ImGui.SetCursorScreenPos(ctx, pad_x, cur_y)
-      ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
-      ImGui.Text(ctx, GenreStr(tags.genre))
-      ImGui.PopStyleColor(ctx, 1)
-      cur_y = cur_y + line_h
-    end
+      -- Difficulty (optional)
+      if S.grid_show_difficulty and tags.difficulty then
+        ImGui.SetCursorScreenPos(ctx, pad_x, cur_y)
+        ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
+        ImGui.Text(ctx, tags.difficulty)
+        ImGui.PopStyleColor(ctx, 1)
+        cur_y = cur_y + line_h
+      end
 
-    -- Duration (optional)
-    if S.grid_show_duration and proj.duration then
-      local mins = math.floor(proj.duration / 60)
-      local secs = math.floor(proj.duration % 60)
-      ImGui.SetCursorScreenPos(ctx, pad_x, cur_y)
-      ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
-      ImGui.Text(ctx, string.format('%d:%02d', mins, secs))
-      ImGui.PopStyleColor(ctx, 1)
-      cur_y = cur_y + line_h
-    end
+      -- Date (optional)
+      if S.grid_show_date and proj.dateStr and proj.dateStr ~= '' then
+        ImGui.SetCursorScreenPos(ctx, pad_x, cur_y)
+        ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
+        ImGui.Text(ctx, FormatDateHuman(proj.dateStr))
+        ImGui.PopStyleColor(ctx, 1)
+        cur_y = cur_y + line_h
+      end
 
-    -- Strings (optional)
-    if S.grid_show_strings and tags.strings then
-      ImGui.SetCursorScreenPos(ctx, pad_x, cur_y)
-      ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
-      ImGui.Text(ctx, tags.strings .. '-string')
-      ImGui.PopStyleColor(ctx, 1)
-      cur_y = cur_y + line_h
-    end
+      -- Tuning (optional)
+      if S.grid_show_tuning and tags.tuning and tags.tuning ~= '' then
+        ImGui.SetCursorScreenPos(ctx, pad_x, cur_y)
+        ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
+        ImGui.Text(ctx, tags.tuning)
+        ImGui.PopStyleColor(ctx, 1)
+        cur_y = cur_y + line_h
+      end
 
-    -- Difficulty (optional)
-    if S.grid_show_difficulty and tags.difficulty then
-      ImGui.SetCursorScreenPos(ctx, pad_x, cur_y)
-      ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
-      ImGui.Text(ctx, tags.difficulty)
-      ImGui.PopStyleColor(ctx, 1)
-      cur_y = cur_y + line_h
-    end
-
-    -- Date (optional)
-    if S.grid_show_date and proj.dateStr and proj.dateStr ~= '' then
-      ImGui.SetCursorScreenPos(ctx, pad_x, cur_y)
-      ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
-      ImGui.Text(ctx, FormatDateHuman(proj.dateStr))
-      ImGui.PopStyleColor(ctx, 1)
-      cur_y = cur_y + line_h
-    end
+      -- Transpose (optional)
+      if S.grid_show_transpose and tags.transpose and tags.transpose ~= '' then
+        ImGui.SetCursorScreenPos(ctx, pad_x, cur_y)
+        ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
+        ImGui.Text(ctx, 'T:' .. tags.transpose)
+        ImGui.PopStyleColor(ctx, 1)
+        cur_y = cur_y + line_h
+      end
+    end -- not grid_show_as_tooltip
 
     ImGui.EndGroup(ctx)
+
+    -- Tooltip mode: show selected fields in compact tooltip on hover
+    -- Tooltip delay: use HoveredFlags_DelayNormal if delay > 0
+    local tooltip_hover_flags = 0
+    if S.grid_tooltip_delay > 0 then
+      tooltip_hover_flags = ImGui.HoveredFlags_DelayNormal
+    end
+    if S.grid_show_as_tooltip and ImGui.IsItemHovered(ctx, tooltip_hover_flags) then
+      local tip_parts = {}
+      -- Row 1: BPM, Key, Strings+Tuning (compact metadata line)
+      local meta = {}
+      if S.grid_show_bpm_key then
+        if proj.displayBPM then meta[#meta + 1] = tostring(proj.displayBPM) .. ' BPM' end
+        if proj.displayKey then meta[#meta + 1] = proj.displayKey end
+      end
+      if S.grid_show_strings and tags.strings then
+        local str_txt = tags.strings .. '-string'
+        -- Combine tuning with strings when both enabled
+        if S.grid_show_tuning and tags.tuning and tags.tuning ~= '' then str_txt = str_txt .. ' ' .. tags.tuning end
+        meta[#meta + 1] = str_txt
+      elseif S.grid_show_tuning and tags.tuning and tags.tuning ~= '' then
+        meta[#meta + 1] = tags.tuning
+      end
+      if S.grid_show_transpose and tags.transpose and tags.transpose ~= '' then
+        meta[#meta + 1] = 'T:' .. tags.transpose
+      end
+      if #meta > 0 then tip_parts[#tip_parts + 1] = table.concat(meta, '  |  ') end
+      -- Row 2: Artist, Album
+      local info = {}
+      if S.grid_show_artist then
+        local a = proj.matchedArtist or proj.artist
+        if a and a ~= '' then info[#info + 1] = a end
+      end
+      if S.grid_show_album and proj.album then info[#info + 1] = proj.album end
+      if #info > 0 then tip_parts[#tip_parts + 1] = table.concat(info, '  |  ') end
+      -- Row 3: Status, Genre, Difficulty
+      local tags_line = {}
+      if S.grid_show_status and tags.status then tags_line[#tags_line + 1] = tags.status end
+      if S.grid_show_genre and tags.genre then tags_line[#tags_line + 1] = GenreStr(tags.genre) end
+      if S.grid_show_difficulty and tags.difficulty then tags_line[#tags_line + 1] = tags.difficulty end
+      if #tags_line > 0 then tip_parts[#tip_parts + 1] = table.concat(tags_line, '  |  ') end
+      -- Row 4: Duration, Date
+      local extra = {}
+      if S.grid_show_duration and proj.duration then
+        extra[#extra + 1] = string.format('%d:%02d', math.floor(proj.duration / 60), math.floor(proj.duration % 60))
+      end
+      if S.grid_show_date and proj.dateStr and proj.dateStr ~= '' then
+        extra[#extra + 1] = FormatDateHuman(proj.dateStr)
+      end
+      if #extra > 0 then tip_parts[#tip_parts + 1] = table.concat(extra, '  |  ') end
+      if #tip_parts > 0 then
+        ImGui.SetTooltip(ctx, table.concat(tip_parts, '\n'))
+      end
+    end
 
     -- Scroll to selected card (keyboard navigation)
     if is_selected and (ImGui.IsKeyPressed(ctx, ImGui.Key_UpArrow) or ImGui.IsKeyPressed(ctx, ImGui.Key_DownArrow)
@@ -5976,6 +6780,13 @@ local function HandleKeys()
       SelectOnly(new_idx)
     end
 
+    -- Action-Hold Lock: Force sync Native Nav to script selection during continuous scrolling
+    -- This physically chokes ImGui's 60fps engine from drifting ahead of REAPER's 30fps script ticks
+    if ImGui.IsKeyDown(ctx, ImGui.Key_DownArrow) or ImGui.IsKeyDown(ctx, ImGui.Key_UpArrow) or
+       ImGui.IsKeyDown(ctx, ImGui.Key_LeftArrow) or ImGui.IsKeyDown(ctx, ImGui.Key_RightArrow) then
+      S.pending_focus_idx = S.selected_idx
+    end
+
     -- Delete key: remove from recent (with confirmation) — supports bulk
     if ImGui.IsKeyPressed(ctx, ImGui.Key_Delete) then
       if SelectionCount() > 1 then
@@ -6081,9 +6892,16 @@ local function DrawSettingsTab()
 
     ImGui.Spacing(ctx)
 
-    -- Grid card text fields (row 1)
+    -- Grid card tooltip mode
     ImGui.AlignTextToFramePadding(ctx)
     ImGui.Text(ctx, 'Grid Card Fields:')
+    ImGui.SameLine(ctx, lbl_w)
+    local gtt_chg, gtt_new = ImGui.Checkbox(ctx, 'Show as Tooltips on Hover##grid_tt', S.grid_show_as_tooltip)
+    if gtt_chg then S.grid_show_as_tooltip = gtt_new; changed = true end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'ON: selected fields appear in tooltip on hover\nOFF: fields render directly on the card') end
+
+    -- Grid card text fields (row 1)
+    ImGui.Text(ctx, '')  -- spacer for alignment
     ImGui.SameLine(ctx, lbl_w)
     local ga_changed, ga_new = ImGui.Checkbox(ctx, 'Artist##grid', S.grid_show_artist)
     if ga_changed then S.grid_show_artist = ga_new; changed = true end
@@ -6118,6 +6936,30 @@ local function DrawSettingsTab()
     ImGui.SameLine(ctx)
     local gdat_chg, gdat_new = ImGui.Checkbox(ctx, 'Date##grid', S.grid_show_date)
     if gdat_chg then S.grid_show_date = gdat_new; changed = true end
+    ImGui.SameLine(ctx)
+    local gtun_chg, gtun_new = ImGui.Checkbox(ctx, 'Tuning##grid', S.grid_show_tuning)
+    if gtun_chg then S.grid_show_tuning = gtun_new; changed = true end
+    ImGui.SameLine(ctx)
+    local gtp_chg, gtp_new = ImGui.Checkbox(ctx, 'Transpose##grid', S.grid_show_transpose)
+    if gtp_chg then S.grid_show_transpose = gtp_new; changed = true end
+
+    -- Grid card spacing
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Grid Card Spacing:')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, 200)
+    local gsp_changed, gsp_new = ImGui.SliderInt(ctx, '##grid_spacing', S.grid_spacing, 0, 32)
+    if gsp_changed then S.grid_spacing = gsp_new; changed = true end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Padding between grid cards (px)') end
+
+    -- Grid tooltip delay
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Grid Tooltip Delay:')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, 200)
+    local gtd_chg, gtd_new = ImGui.SliderDouble(ctx, '##grid_tooltip_delay', S.grid_tooltip_delay, 0.0, 2.0, '%.1f sec')
+    if gtd_chg then S.grid_tooltip_delay = gtd_new; changed = true end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Delay before grid card tooltips appear (0 = instant).\nOnly affects grid card hover tooltips; other tooltips stay instant.') end
 
     -- Grid card line height
     ImGui.AlignTextToFramePadding(ctx)
@@ -6127,6 +6969,19 @@ local function DrawSettingsTab()
     local glh_changed, glh_new = ImGui.SliderInt(ctx, '##grid_line_h', S.grid_line_h, MIN_GRID_LINE_H, MAX_GRID_LINE_H)
     if glh_changed then S.grid_line_h = glh_new; changed = true end
     if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Line height for text under grid cards (px)') end
+
+    -- Primary genres (configurable)
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Primary Genres:')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, 350)
+    local cpg_chg, cpg_new = ImGui.InputText(ctx, '##custom_primary_genres', S.custom_primary_genres)
+    if cpg_chg then S.custom_primary_genres = cpg_new end
+    if ImGui.IsItemDeactivatedAfterEdit(ctx) then
+      RebuildGenreLists()
+      changed = true
+    end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Comma-separated list of primary genres.\nUsed in dropdowns, quick-set menus, and genre filter.\nChanges take effect when you leave this field.') end
 
     ImGui.Spacing(ctx)
 
@@ -7283,6 +8138,13 @@ local function DrawFrame()
   end
   DrawTagEditor()
 
+  -- Bulk tag editor (opened from bulk context menu)
+  if S.bulk_tag_edit_pending then
+    ImGui.OpenPopup(ctx, 'Bulk Edit Tags##bulk_modal')
+    S.bulk_tag_edit_pending = false
+  end
+  DrawBulkTagEditor()
+
   -- Confirmation dialog: Remove from Recent
   if S.confirm_remove_proj then
     ImGui.OpenPopup(ctx, 'Confirm Remove##remove_recent')
@@ -7715,11 +8577,20 @@ local function Loop()
   PushTheme()
   if S.frame_count == 1 then Log('  PushTheme: ' .. string.format('%.1fms', (reaper.time_precise() - t0) * 1000)) end
 
+  -- Set grid tooltip hover delay (only affects IsItemHovered with HoveredFlags_DelayNormal)
+  if S.grid_tooltip_delay > 0 then
+    ImGui.SetConfigVar(ctx, ImGui.ConfigVar_HoverDelayNormal, S.grid_tooltip_delay)
+  else
+    ImGui.SetConfigVar(ctx, ImGui.ConfigVar_HoverDelayNormal, 0.0)
+  end
+
   if S.frame_count == 1 then t0 = reaper.time_precise() end
   ImGui.PushFont(ctx, font, S.font_size)
   if S.frame_count == 1 then Log('  PushFont: ' .. string.format('%.1fms', (reaper.time_precise() - t0) * 1000)) end
 
   local wflags = ImGui.WindowFlags_NoCollapse
+               | ImGui.WindowFlags_NoScrollbar
+               | ImGui.WindowFlags_NoScrollWithMouse
 
   if S.frame_count == 1 then t0 = reaper.time_precise() end
   local visible, open = ImGui.Begin(
