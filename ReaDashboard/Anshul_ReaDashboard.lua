@@ -1,5 +1,5 @@
 -- @description ReaDashboard
--- @version 1.0.1
+-- @version 1.0.3
 -- @author Anshul
 -- @credits solger (for ReaLauncher concept)
 -- @about
@@ -10,14 +10,30 @@
 --   - ReaImGui
 --   - SWS Extensions
 -- @changelog
+--
+--   v1.0.3
+--     + Last Opened sort mode — native REAPER recent order (last opened project first)
+--     + Multiple project folder paths — scan additional folders alongside the primary path
+--     + Configurable image loading budgets — tune first-frame and per-frame budgets in Settings
+--     + Default artwork path — fallback image when project has no art (configurable in Settings)
+--     + Full project name on placeholder — show full name instead of initials when art is missing
+--     + Custom statuses — add your own status presets via Settings (comma-separated)
+--     + Expanded built-in statuses — added Recording, Mixing, On Hold, Released
+--
+--   v1.0.2
+--     + LUA Slot cleanup to free 48 slots by CFG refactor
+--
 --   v1.0.1 (2026-04-09)
+--
 --     + Bulk Tag Editor — edit tags across multiple selected projects at once
 --     + Configurable Primary Genres — customize genre list from Settings
 --     + Grid Card Tooltip Mode — show metadata fields as hover tooltip instead of on-card
 --     + Grid Card Fields — added Tuning and Transpose as optional card/tooltip fields
 --     + Grid Tooltip Delay — configurable hover delay for grid card tooltips
 --     + Configurable Grid Spacing — adjustable card spacing in Settings
+--
 --   v1.0.0 (2026-04-06)
+--
 --     + Initial release
 
 -- ============================================================================
@@ -56,113 +72,189 @@ package.path = reaper.ImGui_GetBuiltinPath() .. '/?.lua'
 local ImGui = require 'imgui' '0.10'
 
 -- ============================================================================
--- SCRIPT CONSTANTS
+-- SCRIPT CONSTANTS (consolidated into CFG table to stay under Lua's 200-local limit)
 -- ============================================================================
 
-local SCRIPT_NAME    = 'ReaDashboard'
-local SCRIPT_VERSION = '1.0.1'
-local EXT_SECTION    = 'ReaDashboard'
+local CFG = {
+  -- Script identity
+  SCRIPT_NAME    = 'ReaDashboard',
+  SCRIPT_VERSION = '1.0.3',
+  EXT_SECTION    = 'ReaDashboard',
 
-local DEFAULT_W = 1050
-local DEFAULT_H = 650
+  -- Window defaults
+  DEFAULT_W = 1050,
+  DEFAULT_H = 650,
 
--- Sort modes
-local SORT_NEWEST    = 1
-local SORT_OLDEST    = 2
-local SORT_AZ        = 3
-local SORT_ZA        = 4
-local SORT_ARTIST_AZ = 5
-local SORT_TITLE_AZ  = 6
-local SORT_LABELS = { 'Newest', 'Oldest', 'A → Z', 'Z → A', 'Artist A→Z', 'Title A→Z' }
+  -- Sort modes
+  SORT_NEWEST    = 1,
+  SORT_OLDEST    = 2,
+  SORT_AZ        = 3,
+  SORT_ZA        = 4,
+  SORT_ARTIST_AZ = 5,
+  SORT_TITLE_AZ  = 6,
+  SORT_RECENT    = 7,
+  SORT_LABELS = { 'Newest', 'Oldest', 'A → Z', 'Z → A', 'Artist A→Z', 'Title A→Z', 'Last Opened' },
 
--- Spicetify key mapping: numeric key (0-11) to note name
-local KEY_NAMES = {
-  [0] = 'C', [1] = 'C#', [2] = 'D', [3] = 'Eb', [4] = 'E', [5] = 'F',
-  [6] = 'F#', [7] = 'G', [8] = 'Ab', [9] = 'A', [10] = 'Bb', [11] = 'B',
+  -- Spicetify key mapping: numeric key (0-11) to note name
+  KEY_NAMES = {
+    [0] = 'C', [1] = 'C#', [2] = 'D', [3] = 'Eb', [4] = 'E', [5] = 'F',
+    [6] = 'F#', [7] = 'G', [8] = 'Ab', [9] = 'A', [10] = 'Bb', [11] = 'B',
+  },
+  MODE_NAMES = { [0] = 'minor', [1] = 'major' },
+
+  -- Tag presets (commonly used tunings first)
+  TUNING_PRESETS = {
+    'Drop D', 'Drop A', 'E Standard',             -- most used (top)
+    'Eb Standard', 'D Standard',                   -- standard variants
+    'Drop C#', 'Drop C', 'Drop B', 'Drop Bb',     -- drop tunings (descending)
+    'Drop Ab', 'Drop G',
+    'Open D', 'Open G', 'DADGAD',                  -- alternate tunings
+    'Custom',
+  },
+
+  -- Transpose presets (semitones, applied via Neural DSP transpose plugin)
+  TRANSPOSE_PRESETS = {
+    '0 (none)', '-1', '-2', '-3', '-4', '-5', '-6',
+    '+1', '+2',
+  },
+
+  -- Guitar presets
+  GUITAR_PRESETS = {
+    'Gibson', 'Fender', 'PRS', 'Ibanez', 'ESP', 'Schecter', 'Jackson', 'Custom',
+  },
+
+  STATUS_PRESETS = {
+    'Practicing', 'Learning', 'Need to Learn',
+    'WIP', 'Recording', 'Mixing', 'Complete', 'Released',
+    'Needs Mixing', 'On Hold', 'Abandoned',
+  },
+  STATUS_COLORS = {
+    Practicing        = 0x6EB5DEFF,
+    Learning          = 0x9B8FD6FF,
+    ['Need to Learn'] = 0xC49A6CFF,
+    WIP               = 0xE8B84DFF,
+    Recording         = 0xE85D5DFF,
+    Mixing            = 0x5DB8E8FF,
+    Complete          = 0x4DB870FF,
+    Released          = 0x70C470FF,
+    ['Needs Mixing']  = 0x4A8FB8FF,
+    ['On Hold']       = 0x8C8C8CFF,
+    Abandoned         = 0xB84D4DFF,
+  },
+  STATUS_DEFAULT_COLOR = 0x9E9E9EFF,  -- neutral gray for custom statuses
+
+  DIFFICULTY_PRESETS = { 'Easy', 'Medium', 'Hard', 'Insane' },
+
+  STRING_FILTER_OPTIONS = { 'All', '6', '7', '8', 'Unset' },
+  STATUS_FILTER_OPTIONS = { 'All', 'Practicing', 'Learning', 'Need to Learn', 'WIP', 'Recording', 'Mixing', 'Complete', 'Released', 'Needs Mixing', 'On Hold', 'Abandoned', 'Unset' },
+  -- Coverage dropdown removed (2026-03-24) — tri-state buttons (Meta/Art/Tags) fully replace it
+
+  -- External data paths (READ-ONLY)
+  ART_FILE_PREFS = { 'Spotify.jpg', 'iTunes.jpg', 'LastFM.png' },
+
+  -- Font & art size defaults
+  DEFAULT_FONT_SIZE = 14,
+  MIN_FONT_SIZE     = 10,
+  MAX_FONT_SIZE     = 24,
+
+  DEFAULT_ART_SIZE  = 36,   -- thumbnail pixels (before scale)
+  MIN_ART_SIZE      = 20,
+  MAX_ART_SIZE      = 80,
+
+  -- Grid card size defaults
+  DEFAULT_GRID_CARD_SIZE = 200,
+  MIN_GRID_CARD_SIZE     = 100,
+  MAX_GRID_CARD_SIZE     = 500,
+
+  -- Custom album art filenames to look for in project folders (highest priority)
+  PROJECT_ART_NAMES = { 'cover.jpg', 'cover.png', 'folder.jpg', 'folder.png', 'art.jpg', 'art.png' },
+
+  -- All-projects browser: scan path, cache, limits (configurable via Settings)
+  -- ALL_PROJECTS_PATH and ALL_SCAN_MAX_DEPTH are in S table (see STATE section)
+  ALL_SCAN_EXCLUDED = {},  -- folder names to skip (empty for now, configurable later)
+
+  -- Grid card text line height (configurable)
+  DEFAULT_GRID_LINE_H = 14,
+  MIN_GRID_LINE_H     = 10,
+  MAX_GRID_LINE_H     = 24,
+
+  -- Date formatting
+  MONTH_NAMES = { 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec' },
+
+  -- Spicetify artist matching
+  ARTIST_ABBREVIATIONS = {
+    ['bfmv']       = 'bullet for my valentine',
+    ['log']        = 'lamb of god',
+  },
+  ARTIST_VARIANTS = {
+    ['tesseract']    = 'tesseract',   -- case matters in filenames: TesseracT
+    ['novelistsfr']  = 'novelists',   -- Novelists FR → NOVELISTS in spicetify DB
+    ['paulgilbert']  = 'racerx',      -- Paul Gilbert covers are Racer X originals in DB
+  },
+
+  -- Suffixes to strip from project song names when matching (lowercase)
+  STRIP_SUFFIXES = {
+    'practice', 'shorter', 'old', 'copy', 'backup', 'v2', 'v3', 'mix', 'demo', 'new',
+    'only solo', 'guitar pro', 'gp midi', 'gp new', 'dark loop', 'tempo map experiment',
+    'stephen ndsp', 'nail the mix', 'live', 'imported', 'stems', 'redo',
+    'mk slicer test', 'quantize test', 'test', 'tone test',
+    'extended intro', 'guitar hero', 'reel', 'midi',
+    'full',  -- keep last: strips after inner suffixes (e.g. "Full New" → strip new → strip full)
+  },
+
+  -- Primary genre map: first-genre string (lowercase) → short display label
+  PRIMARY_GENRE_MAP = {
+    ['djent']              = 'Djent',
+    ['progressive metal']  = 'Prog',
+    ['progressive rock']   = 'Prog',
+    ['progressive']        = 'Prog',
+    ['guitar instrumental']= 'Prog',
+    ['thrash metal']       = 'Metal',
+    ['groove metal']       = 'Metal',
+    ['heavy metal']        = 'Metal',
+    ['death metal']        = 'Metal',
+    ['power metal']        = 'Metal',
+    ['alternative metal']  = 'Metal',
+    ['metalcore']          = 'Metal',
+    ['post-hardcore']      = 'Metal',
+    ['nu-metal']           = 'Metal',
+    ['hard rock']          = 'Rock',
+    ['classic rock']       = 'Rock',
+    ['blues rock']         = 'Rock',
+    ['soft rock']          = 'Rock',
+    ['alternative rock']   = 'Indie',
+    ['indie rock']         = 'Indie',
+    ['indie folk']         = 'Indie',
+    ['indie']              = 'Indie',
+    ['alternative']        = 'Indie',
+    ['post-rock']          = 'Indie',
+    ['jazz']               = 'Jazz',
+    ['fusion']             = 'Jazz',
+    ['pop']                = 'Pop',
+    ['synth-pop']          = 'Pop',
+    ['electropop']         = 'Pop',
+    ['blues']              = 'Blues',
+    ['delta blues']        = 'Blues',
+    ['chicago blues']      = 'Blues',
+    ['country blues']      = 'Blues',
+  },
+
+  -- Ordered list of primary genres for dropdowns and quick-set menus
+  PRIMARY_GENRES = { 'Djent', 'Prog', 'Metal', 'Rock', 'Pop', 'Blues', 'Indie', 'Jazz' },
+
+  -- Genre filter dropdown options (index 1 = All; rest must match PRIMARY_GENRE_MAP values)
+  GENRE_FILTER_OPTIONS = { 'All', 'Djent', 'Prog', 'Metal', 'Rock', 'Pop', 'Blues', 'Indie', 'Jazz', 'Unset' },
+
+  -- Image loading
+  DEFER_IMAGES = true,
 }
-local MODE_NAMES = { [0] = 'minor', [1] = 'major' }
 
--- Tag presets
--- Commonly used tunings first
-local TUNING_PRESETS = {
-  'Drop D', 'Drop A', 'E Standard',             -- most used (top)
-  'Eb Standard', 'D Standard',                   -- standard variants
-  'Drop C#', 'Drop C', 'Drop B', 'Drop Bb',     -- drop tunings (descending)
-  'Drop Ab', 'Drop G',
-  'Open D', 'Open G', 'DADGAD',                  -- alternate tunings
-  'Custom',
-}
-
--- Transpose presets (semitones, applied via Neural DSP transpose plugin)
-local TRANSPOSE_PRESETS = {
-  '0 (none)', '-1', '-2', '-3', '-4', '-5', '-6',
-  '+1', '+2',
-}
-
--- Guitar presets
-local GUITAR_PRESETS = {
-  'Gibson', 'Fender', 'PRS', 'Ibanez', 'ESP', 'Schecter', 'Jackson', 'Custom',
-}
-
-local STATUS_PRESETS = {
-  'Practicing', 'Learning', 'Need to Learn',
-  'WIP', 'Complete', 'Needs Mixing', 'Abandoned',
-}
-local STATUS_COLORS = {
-  Practicing        = 0x6EB5DEFF,
-  Learning          = 0x9B8FD6FF,
-  ['Need to Learn'] = 0xC49A6CFF,
-  WIP               = 0xE8B84DFF,
-  Complete          = 0x4DB870FF,
-  ['Needs Mixing']  = 0x4A8FB8FF,
-  Abandoned         = 0xB84D4DFF,
-}
-
-local DIFFICULTY_PRESETS = { 'Easy', 'Medium', 'Hard', 'Insane' }
-
-local STRING_FILTER_OPTIONS = { 'All', '6', '7', '8', 'Unset' }
-local STATUS_FILTER_OPTIONS = { 'All', 'WIP', 'Complete', 'Needs Mixing', 'Abandoned', 'Practicing', 'Need to Learn', 'Learning', 'Unset' }
--- Coverage dropdown removed (2026-03-24) — tri-state buttons (Meta/Art/Tags) fully replace it
-
--- Build tuning filter options from presets (All + each tuning preset + None)
-local TUNING_FILTER_OPTIONS = { 'All' }
-for _, t in ipairs(TUNING_PRESETS) do
-  TUNING_FILTER_OPTIONS[#TUNING_FILTER_OPTIONS + 1] = t
+-- Build tuning filter options from presets (All + each tuning preset + Unset)
+CFG.TUNING_FILTER_OPTIONS = { 'All' }
+for _, t in ipairs(CFG.TUNING_PRESETS) do
+  CFG.TUNING_FILTER_OPTIONS[#CFG.TUNING_FILTER_OPTIONS + 1] = t
 end
-TUNING_FILTER_OPTIONS[#TUNING_FILTER_OPTIONS + 1] = 'Unset'
-
--- External data paths (READ-ONLY)
-local ART_FILE_PREFS = { 'Spotify.jpg', 'iTunes.jpg', 'LastFM.png' }
-
--- Thumbnail size for list view (base size, scaled by S.art_size)
-local BASE_art_size = 36
-
--- Font & art size defaults
-local DEFAULT_FONT_SIZE = 14
-local MIN_FONT_SIZE     = 10
-local MAX_FONT_SIZE     = 24
-
-local DEFAULT_ART_SIZE  = 36   -- thumbnail pixels (before scale)
-local MIN_ART_SIZE      = 20
-local MAX_ART_SIZE      = 80
-local ART_SIZE_STEP     = 4
-
--- Grid card size defaults
-local DEFAULT_GRID_CARD_SIZE = 200
-local MIN_GRID_CARD_SIZE     = 100
-local MAX_GRID_CARD_SIZE     = 500
-
--- Custom album art filenames to look for in project folders (highest priority)
-local PROJECT_ART_NAMES = { 'cover.jpg', 'cover.png', 'folder.jpg', 'folder.png', 'art.jpg', 'art.png' }
-
--- All-projects browser: scan path, cache, limits (configurable via Settings)
--- ALL_PROJECTS_PATH and ALL_SCAN_MAX_DEPTH are in S table (see STATE section)
-local ALL_SCAN_EXCLUDED     = {}  -- folder names to skip (empty for now, configurable later)
-
--- Grid card text line height (configurable)
-local DEFAULT_GRID_LINE_H = 14
-local MIN_GRID_LINE_H     = 10
-local MAX_GRID_LINE_H     = 24
+CFG.TUNING_FILTER_OPTIONS[#CFG.TUNING_FILTER_OPTIONS + 1] = 'Unset'
 
 -- ============================================================================
 -- COLOR THEME
@@ -367,9 +459,9 @@ local S = {
   ALL_PROJECTS_PATH = '',
 
   -- Size settings (persisted via ExtState)
-  font_size      = DEFAULT_FONT_SIZE,
-  art_size       = DEFAULT_ART_SIZE,
-  grid_card_size = DEFAULT_GRID_CARD_SIZE,
+  font_size      = CFG.DEFAULT_FONT_SIZE,
+  art_size       = CFG.DEFAULT_ART_SIZE,
+  grid_card_size = CFG.DEFAULT_GRID_CARD_SIZE,
   grid_spacing   = 8,
 
   -- Data lists
@@ -381,11 +473,11 @@ local S = {
 
   -- UI state
   search_buf  = '',
-  recent_sort_mode = SORT_NEWEST,  -- current session sort for Recent tab
-  all_sort_mode    = SORT_AZ,      -- current session sort for All Projects tab
-  sort_mode        = SORT_NEWEST,  -- active sort (set from tab's sort mode)
-  default_recent_sort = SORT_NEWEST, -- default sort applied on script launch (persisted)
-  default_all_sort    = SORT_AZ,     -- default sort applied on script launch (persisted)
+  recent_sort_mode = CFG.SORT_NEWEST,  -- current session sort for Recent tab
+  all_sort_mode    = CFG.SORT_AZ,      -- current session sort for All Projects tab
+  sort_mode        = CFG.SORT_NEWEST,  -- active sort (set from tab's sort mode)
+  default_recent_sort = CFG.SORT_NEWEST, -- default sort applied on script launch (persisted)
+  default_all_sort    = CFG.SORT_AZ,     -- default sort applied on script launch (persisted)
   artist_sort_by_album = false,      -- group by album within Artist A→Z sort
   view_mode   = 'list',  -- 'list' or 'grid' (active, set from per-tab view)
   recent_view_mode = 'list',
@@ -402,7 +494,7 @@ local S = {
   grid_show_artist = false,
   grid_show_bpm_key = false,
   grid_show_status = false,
-  grid_line_h = DEFAULT_GRID_LINE_H,
+  grid_line_h = CFG.DEFAULT_GRID_LINE_H,
   show_art_placeholder = true,
   needs_load  = true,
   window_open = true,
@@ -412,7 +504,7 @@ local S = {
   filter_tuning   = 1,
   filter_status   = 1,
   filter_favs     = false,
-  filter_genre    = 1,  -- 1=All; index into GENRE_FILTER_OPTIONS
+  filter_genre    = 1,  -- 1=All; index into CFG.GENRE_FILTER_OPTIONS
   filter_tri_meta = 0,  -- 0=neutral, 1=require, 2=exclude
   filter_tri_art  = 0,
   filter_tri_tags = 0,
@@ -485,10 +577,15 @@ local S = {
   pushed_vars   = 0,
 
   -- Configurable settings (persisted)
-  ALL_PROJECTS_PATH  = '',
+  ALL_PROJECTS_PATH  = '',         -- primary path (legacy, for backward compat)
+  additional_project_paths = {},   -- additional scan paths (list of strings)
+  default_artwork_path = '',  -- fallback art when project has no art
+  placeholder_full_name = false,  -- show full project name on placeholder instead of initials
   debug_logging = false,
   ALL_SCAN_MAX_DEPTH = 10,
   IMAGE_BATCH_SIZE   = 5,
+  img_first_frame_ms = 32,   -- ms budget for image loading on first frame
+  img_per_frame_ms   = 16,   -- ms budget for image loading on subsequent frames
 
   -- Cache/scan state
   spicetify_scanned = false,
@@ -514,6 +611,7 @@ local S = {
 
   -- Configurable primary genres (comma-separated)
   custom_primary_genres = 'Djent,Prog,Metal,Rock,Pop,Blues,Indie,Jazz',
+  custom_statuses = '',  -- comma-separated custom statuses (appended to built-in list)
 
   -- Color theme
   accent_color  = 0x4A8FB8,  -- RGB (no alpha), default blue
@@ -986,75 +1084,9 @@ local project_tags = {}
 local spicetify_cache = {}
 -- spicetify_scanned is in S table
 
--- Abbreviation map: common short names -> full artist names in Spicetify DB
-local ARTIST_ABBREVIATIONS = {
-  ['bfmv']       = 'bullet for my valentine',
-  ['log']        = 'lamb of god',
-}
 
--- Known artist name variants: normalized project name -> normalized spicetify name
--- Keys MUST be normalized (lowercase, alphanumeric only — no spaces/punctuation)
-local ARTIST_VARIANTS = {
-  ['tesseract']    = 'tesseract',   -- case matters in filenames: TesseracT
-  ['novelistsfr']  = 'novelists',   -- Novelists FR → NOVELISTS in spicetify DB
-  ['paulgilbert']  = 'racerx',      -- Paul Gilbert covers are Racer X originals in DB
-}
 
--- Suffixes to strip from project song names when matching (lowercase)
-local STRIP_SUFFIXES = {
-  'practice', 'shorter', 'old', 'copy', 'backup', 'v2', 'v3', 'mix', 'demo', 'new',
-  'only solo', 'guitar pro', 'gp midi', 'gp new', 'dark loop', 'tempo map experiment',
-  'stephen ndsp', 'nail the mix', 'live', 'imported', 'stems', 'redo',
-  'mk slicer test', 'quantize test', 'test', 'tone test',
-  'extended intro', 'guitar hero', 'reel', 'midi',
-  'full',  -- keep last: strips after inner suffixes (e.g. "Full New" → strip new → strip full)
-}
-
--- Primary genre map: first-genre string (lowercase) → short display label.
--- Used for the Genre column and Genre filter. The full genre string is still used for text search.
-local PRIMARY_GENRE_MAP = {
-  ['djent']              = 'Djent',
-  ['progressive metal']  = 'Prog',
-  ['progressive rock']   = 'Prog',
-  ['progressive']        = 'Prog',
-  ['guitar instrumental']= 'Prog',
-  ['thrash metal']       = 'Metal',
-  ['groove metal']       = 'Metal',
-  ['heavy metal']        = 'Metal',
-  ['death metal']        = 'Metal',
-  ['power metal']        = 'Metal',
-  ['alternative metal']  = 'Metal',
-  ['metalcore']          = 'Metal',
-  ['post-hardcore']      = 'Metal',
-  ['nu-metal']           = 'Metal',
-  ['hard rock']          = 'Rock',
-  ['classic rock']       = 'Rock',
-  ['blues rock']         = 'Rock',
-  ['soft rock']          = 'Rock',
-  ['alternative rock']   = 'Indie',
-  ['indie rock']         = 'Indie',
-  ['indie folk']         = 'Indie',
-  ['indie']              = 'Indie',
-  ['alternative']        = 'Indie',
-  ['post-rock']          = 'Indie',
-  ['jazz']               = 'Jazz',
-  ['fusion']             = 'Jazz',
-  ['pop']                = 'Pop',
-  ['synth-pop']          = 'Pop',
-  ['electropop']         = 'Pop',
-  ['blues']              = 'Blues',
-  ['delta blues']        = 'Blues',
-  ['chicago blues']      = 'Blues',
-  ['country blues']      = 'Blues',
-}
-
--- Ordered list of primary genres for dropdowns and quick-set menus
-local PRIMARY_GENRES = { 'Djent', 'Prog', 'Metal', 'Rock', 'Pop', 'Blues', 'Indie', 'Jazz' }
-
--- Genre filter dropdown options (index 1 = All; rest must match PRIMARY_GENRE_MAP values)
-local GENRE_FILTER_OPTIONS = { 'All', 'Djent', 'Prog', 'Metal', 'Rock', 'Pop', 'Blues', 'Indie', 'Jazz', 'Unset' }
-
--- Rebuild PRIMARY_GENRES and GENRE_FILTER_OPTIONS from S.custom_primary_genres string
+-- Rebuild CFG.PRIMARY_GENRES and CFG.GENRE_FILTER_OPTIONS from S.custom_primary_genres string
 local function RebuildGenreLists()
   -- Parse comma-separated, trim whitespace
   local genres = {}
@@ -1062,14 +1094,50 @@ local function RebuildGenreLists()
     local trimmed = g:match('^%s*(.-)%s*$')
     if trimmed ~= '' then genres[#genres + 1] = trimmed end
   end
-  -- Repopulate PRIMARY_GENRES in-place
-  for i = #PRIMARY_GENRES, 1, -1 do PRIMARY_GENRES[i] = nil end
-  for i, g in ipairs(genres) do PRIMARY_GENRES[i] = g end
-  -- Repopulate GENRE_FILTER_OPTIONS: All + genres + Unset
-  for i = #GENRE_FILTER_OPTIONS, 1, -1 do GENRE_FILTER_OPTIONS[i] = nil end
-  GENRE_FILTER_OPTIONS[1] = 'All'
-  for i, g in ipairs(genres) do GENRE_FILTER_OPTIONS[i + 1] = g end
-  GENRE_FILTER_OPTIONS[#GENRE_FILTER_OPTIONS + 1] = 'Unset'
+  -- Repopulate CFG.PRIMARY_GENRES in-place
+  for i = #CFG.PRIMARY_GENRES, 1, -1 do CFG.PRIMARY_GENRES[i] = nil end
+  for i, g in ipairs(genres) do CFG.PRIMARY_GENRES[i] = g end
+  -- Repopulate CFG.GENRE_FILTER_OPTIONS: All + genres + Unset
+  for i = #CFG.GENRE_FILTER_OPTIONS, 1, -1 do CFG.GENRE_FILTER_OPTIONS[i] = nil end
+  CFG.GENRE_FILTER_OPTIONS[1] = 'All'
+  for i, g in ipairs(genres) do CFG.GENRE_FILTER_OPTIONS[i + 1] = g end
+  CFG.GENRE_FILTER_OPTIONS[#CFG.GENRE_FILTER_OPTIONS + 1] = 'Unset'
+end
+
+-- Rebuild CFG.STATUS_PRESETS and CFG.STATUS_FILTER_OPTIONS from custom_statuses string
+local function RebuildStatusLists()
+  -- Start with built-in statuses
+  local builtins = {
+    'Practicing', 'Learning', 'Need to Learn',
+    'WIP', 'Recording', 'Mixing', 'Complete', 'Released',
+    'Needs Mixing', 'On Hold', 'Abandoned',
+  }
+  local builtin_set = {}
+  for _, s in ipairs(builtins) do builtin_set[s:lower()] = true end
+
+  -- Parse custom statuses (comma-separated)
+  local customs = {}
+  if S.custom_statuses ~= '' then
+    for s in S.custom_statuses:gmatch('[^,]+') do
+      local trimmed = s:match('^%s*(.-)%s*$')
+      if trimmed ~= '' and not builtin_set[trimmed:lower()] then
+        customs[#customs + 1] = trimmed
+      end
+    end
+  end
+
+  -- Rebuild CFG.STATUS_PRESETS in-place: builtins + customs
+  for i = #CFG.STATUS_PRESETS, 1, -1 do CFG.STATUS_PRESETS[i] = nil end
+  for i, s in ipairs(builtins) do CFG.STATUS_PRESETS[i] = s end
+  for _, s in ipairs(customs) do CFG.STATUS_PRESETS[#CFG.STATUS_PRESETS + 1] = s end
+
+  -- Rebuild CFG.STATUS_FILTER_OPTIONS: All + all statuses + Unset
+  for i = #CFG.STATUS_FILTER_OPTIONS, 1, -1 do CFG.STATUS_FILTER_OPTIONS[i] = nil end
+  CFG.STATUS_FILTER_OPTIONS[1] = 'All'
+  for _, s in ipairs(CFG.STATUS_PRESETS) do
+    CFG.STATUS_FILTER_OPTIONS[#CFG.STATUS_FILTER_OPTIONS + 1] = s
+  end
+  CFG.STATUS_FILTER_OPTIONS[#CFG.STATUS_FILTER_OPTIONS + 1] = 'Unset'
 end
 
 -- Image cache: path -> ImGui image handle or false
@@ -1078,11 +1146,7 @@ local image_cache = {}
 -- Progressive image loading: load images across frames to avoid startup stall
 local image_load_queue = {}  -- list of paths still to be loaded
 -- IMAGE_BATCH_SIZE is in S table
-local INITIAL_IMAGE_BATCH = 0  -- images to pre-load on first frame (0 = show window instantly with placeholders)
 -- fade_in_duration is in S table (persisted, adjustable in Settings)
--- Set DEFER_IMAGES to true: GetImage returns placeholder during progressive loading (faster first frame)
--- Set DEFER_IMAGES to false: GetImage loads on-demand as before (slower first frame, no placeholder flash)
-local DEFER_IMAGES = true
 
 -- ============================================================================
 -- UTILITIES
@@ -1110,14 +1174,13 @@ end
 
 --- Convert JS_File_Stat date string to human-readable "22 Mar 2026".
 --- Handles both slash-separated ("YYYY/MM/DD") and dot-separated ("YYYY.MM.DD") formats.
-local MONTH_NAMES = { 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec' }
 local function FormatDateHuman(dateStr)
   if not dateStr or dateStr == '' then return '' end
   local y, m, d = dateStr:match('^(%d+)[/.](%d+)[/.](%d+)')
   if not y then return dateStr end
   local mi = tonumber(m)
   local di = tonumber(d)
-  local monthName = MONTH_NAMES[mi] or m
+  local monthName = CFG.MONTH_NAMES[mi] or m
   return string.format('%d %s %s', di, monthName, y)
 end
 
@@ -1264,9 +1327,9 @@ end
 --- Format key number + mode into readable string (e.g. "F# major").
 local function FormatKey(keyNum, mode)
   if keyNum == nil then return nil end
-  local name = KEY_NAMES[keyNum]
+  local name = CFG.KEY_NAMES[keyNum]
   if not name then return nil end
-  local modeName = MODE_NAMES[mode]
+  local modeName = CFG.MODE_NAMES[mode]
   if modeName then
     return name .. ' ' .. modeName
   end
@@ -1348,14 +1411,14 @@ local function LookupByArtist(normArtist, normSong)
   if songs and songs[normSong] then return songs[normSong] end
 
   -- Abbreviation expansion (e.g., bfmv → bullet for my valentine)
-  local expanded = ARTIST_ABBREVIATIONS[normArtist]
+  local expanded = CFG.ARTIST_ABBREVIATIONS[normArtist]
   if expanded then
     songs = spicetify_by_artist[NormalizeStr(expanded)]
     if songs and songs[normSong] then return songs[normSong] end
   end
 
   -- Artist variant (e.g., tesseract → tesseract with different casing in original)
-  local variant = ARTIST_VARIANTS[normArtist]
+  local variant = CFG.ARTIST_VARIANTS[normArtist]
   if variant then
     songs = spicetify_by_artist[NormalizeStr(variant)]
     if songs and songs[normSong] then return songs[normSong] end
@@ -1367,9 +1430,9 @@ end
 --- Get all artist name variants (normalized) for a given normalized artist name.
 local function GetArtistVariants(normArtist)
   local variants = { normArtist }
-  local expanded = ARTIST_ABBREVIATIONS[normArtist]
+  local expanded = CFG.ARTIST_ABBREVIATIONS[normArtist]
   if expanded then variants[#variants + 1] = NormalizeStr(expanded) end
-  local variant = ARTIST_VARIANTS[normArtist]
+  local variant = CFG.ARTIST_VARIANTS[normArtist]
   if variant then variants[#variants + 1] = NormalizeStr(variant) end
   return variants
 end
@@ -1381,7 +1444,7 @@ local function StripSuffixes(rawSong)
   local stripped = rawSong
   for pass = 1, 3 do
     local changed = false
-    for _, suffix in ipairs(STRIP_SUFFIXES) do
+    for _, suffix in ipairs(CFG.STRIP_SUFFIXES) do
       -- Case-insensitive suffix match at end of string (after a space)
       local pattern = '%s+' .. suffix .. '$'
       local result = stripped:lower():gsub(pattern, '')
@@ -1582,7 +1645,7 @@ end
 --- Tries multiple folder name variants to handle filesystem-safe encoding differences.
 local function TryArtFolder(folderName)
   if not S.enable_spicetify or S.album_art_db_path == '' then return nil end
-  for _, artFile in ipairs(ART_FILE_PREFS) do
+  for _, artFile in ipairs(CFG.ART_FILE_PREFS) do
     local path = S.album_art_db_path .. '/' .. folderName .. '/' .. artFile
     if FileExists(path) then return path end
   end
@@ -1635,7 +1698,7 @@ local function ResolveAlbumArt(artist, album)
 end
 
 --- Get or create a cached ImGui image handle.
---- When DEFER_IMAGES is true and images are still loading, returns nil (shows placeholder)
+--- When CFG.DEFER_IMAGES is true and images are still loading, returns nil (shows placeholder)
 --- instead of decoding on-demand. This makes the first frame render near-instantly.
 local function GetImage(path)
   if not path then return nil end
@@ -1645,7 +1708,7 @@ local function GetImage(path)
   end
 
   -- During progressive loading, don't decode on-demand — show placeholder instead
-  if DEFER_IMAGES and #image_load_queue > 0 then
+  if CFG.DEFER_IMAGES and #image_load_queue > 0 then
     return nil
   end
 
@@ -1664,9 +1727,13 @@ end
 --- Call after data load to prepare progressive loading.
 local function BuildImageQueue()
   image_load_queue = {}
+  local queued = {}
   for _, proj in ipairs(S.filtered_projects) do
     if proj.albumArtPath and image_cache[proj.albumArtPath] == nil and FileExists(proj.albumArtPath) then
-      image_load_queue[#image_load_queue + 1] = proj.albumArtPath
+      if not queued[proj.albumArtPath] then
+        image_load_queue[#image_load_queue + 1] = proj.albumArtPath
+        queued[proj.albumArtPath] = true
+      end
     elseif proj.albumArtPath and not FileExists(proj.albumArtPath) then
       -- File was moved/deleted since cache was built — clear stale path
       proj.albumArtPath = nil
@@ -1705,13 +1772,27 @@ end
 
 --- Draw a placeholder rectangle for missing album art.
 local function DrawArtPlaceholder(proj, size)
-  local label = S.show_art_placeholder
-    and (((proj.artist or proj.name) or '?'):sub(1, 2):upper())
-    or ''
+  local label = ''
+  if S.show_art_placeholder then
+    if S.placeholder_full_name then
+      -- Full project name (wrapped by button width)
+      label = proj.name or proj.song or '?'
+    else
+      -- 2-character initials
+      label = ((proj.artist or proj.name) or '?'):sub(1, 2):upper()
+    end
+  end
   ImGui.PushStyleColor(ctx, ImGui.Col_Button, 0x333333FF)
   ImGui.PushStyleColor(ctx, ImGui.Col_ButtonHovered, 0x333333FF)
   ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive, 0x333333FF)
+  if S.placeholder_full_name and S.show_art_placeholder then
+    -- Use text wrapping for long names on grid cards
+    ImGui.PushTextWrapPos(ctx, ImGui.GetCursorPosX(ctx) + size)
+  end
   ImGui.Button(ctx, label .. '##ph' .. tostring(proj.path or ''), size, size)
+  if S.placeholder_full_name and S.show_art_placeholder then
+    ImGui.PopTextWrapPos(ctx)
+  end
   ImGui.PopStyleColor(ctx, 3)
 end
 
@@ -1822,7 +1903,7 @@ local function LoadHidden()
   local f = io.open(HIDDEN_FILE, 'r')
   if not f then
     -- Migration: check ExtState for legacy newline/pipe-separated data
-    local hp = reaper.GetExtState(EXT_SECTION, 'hidden_projects')
+    local hp = reaper.GetExtState(CFG.EXT_SECTION, 'hidden_projects')
     if hp ~= '' then
       S.hidden_projects = {}
       for path in hp:gmatch('[^\n|]+') do
@@ -1831,7 +1912,7 @@ local function LoadHidden()
       Log('Migrated ' .. (function() local n=0; for _ in pairs(S.hidden_projects) do n=n+1 end; return n end)() .. ' hidden projects from ExtState')
       -- Save to new JSON file and clear ExtState key
       SaveHidden()
-      reaper.DeleteExtState(EXT_SECTION, 'hidden_projects', true)
+      reaper.DeleteExtState(CFG.EXT_SECTION, 'hidden_projects', true)
     end
     return
   end
@@ -1875,7 +1956,7 @@ local function LoadWhitelist()
   local f = io.open(WHITELIST_FILE, 'r')
   if not f then
     -- Migration: check ExtState for legacy main_only_whitelist (pipe-separated)
-    local wl = reaper.GetExtState(EXT_SECTION, 'main_only_whitelist')
+    local wl = reaper.GetExtState(CFG.EXT_SECTION, 'main_only_whitelist')
     if wl ~= '' then
       S.whitelist = {}
       for path in wl:gmatch('[^|]+') do
@@ -1883,7 +1964,7 @@ local function LoadWhitelist()
       end
       Log('Migrated ' .. (function() local n=0; for _ in pairs(S.whitelist) do n=n+1 end; return n end)() .. ' whitelist entries from ExtState')
       SaveWhitelist()
-      reaper.DeleteExtState(EXT_SECTION, 'main_only_whitelist', true)
+      reaper.DeleteExtState(CFG.EXT_SECTION, 'main_only_whitelist', true)
     end
     return
   end
@@ -1918,7 +1999,7 @@ local function GenreStr(g)
 end
 
 --- Extract primary genre label for display and filtering.
---- Takes the first item from array or first comma-split value, then maps it via PRIMARY_GENRE_MAP.
+--- Takes the first item from array or first comma-split value, then maps it via CFG.PRIMARY_GENRE_MAP.
 --- Returns the mapped short label (e.g. 'Djent'), the raw value if unmapped, or nil if no genre.
 local function GetPrimaryGenre(tags)
   if not tags then return nil end
@@ -1933,7 +2014,7 @@ local function GetPrimaryGenre(tags)
   if not first or first == '' then return nil end
   first = first:match('^%s*(.-)%s*$')  -- trim surrounding whitespace
   if first == '' then return nil end
-  return PRIMARY_GENRE_MAP[first:lower()] or first
+  return CFG.PRIMARY_GENRE_MAP[first:lower()] or first
 end
 
 --- Get tags table for a project path.
@@ -2096,18 +2177,29 @@ local function ScanDirectoryRecursive(basePath, depth, maxDepth, excludedSet)
   return results
 end
 
---- Scan S.ALL_PROJECTS_PATH for all .rpp files. Returns project list (same format as LoadRecentProjects).
+--- Scan all configured project paths for .rpp files. Returns project list (same format as LoadRecentProjects).
 local function ScanAllProjectFiles()
-  Log('Scanning all projects from: ' .. S.ALL_PROJECTS_PATH)
   local t0 = reaper.time_precise()
 
   -- Build excluded set for fast lookup
   local excludedSet = {}
-  for _, name in ipairs(ALL_SCAN_EXCLUDED) do
+  for _, name in ipairs(CFG.ALL_SCAN_EXCLUDED) do
     excludedSet[name:lower()] = true
   end
 
-  local paths = ScanDirectoryRecursive(S.ALL_PROJECTS_PATH, 0, S.ALL_SCAN_MAX_DEPTH, excludedSet)
+  -- Collect all scan paths: primary + additional
+  local scan_paths = {}
+  if S.ALL_PROJECTS_PATH ~= '' then scan_paths[#scan_paths + 1] = S.ALL_PROJECTS_PATH end
+  for _, p in ipairs(S.additional_project_paths) do
+    if p ~= '' then scan_paths[#scan_paths + 1] = p end
+  end
+
+  local paths = {}
+  for _, scan_path in ipairs(scan_paths) do
+    Log('Scanning all projects from: ' .. scan_path)
+    local sub_paths = ScanDirectoryRecursive(scan_path, 0, S.ALL_SCAN_MAX_DEPTH, excludedSet)
+    for _, sp in ipairs(sub_paths) do paths[#paths + 1] = sp end
+  end
   Log('  Directory scan: ' .. #paths .. ' .rpp files in ' .. string.format('%.1fms', (reaper.time_precise() - t0) * 1000))
 
   -- Deduplicate by filename (same logic as LoadRecentProjects)
@@ -2359,6 +2451,11 @@ local function ApplyCachedMetadata(projectList)
       proj.albumArtPath = tags_check.artOverride
     end
 
+    -- Default artwork fallback (user-configured in Settings)
+    if not proj.albumArtPath and S.default_artwork_path ~= '' and FileExists(S.default_artwork_path) then
+      proj.albumArtPath = S.default_artwork_path
+    end
+
     if proj.albumArtPath then art_hits = art_hits + 1 end
 
     -- Load tags
@@ -2454,6 +2551,7 @@ local function LoadRecentProjects()
           filename = filename,
           exists   = exists,
           dateStr  = dateStr,
+          recent_index = #result + 1,  -- REAPER.ini order = last-opened order
         }
       else
         dupes = dupes + 1
@@ -2511,7 +2609,7 @@ local function EnrichProjects(projectList)
     -- 1. Check project folder for custom art (relaxed matching chain)
     if proj.exists and proj.dir ~= '' then
       -- 1a. Exact name match (cover.jpg, folder.png, art.jpg, etc.)
-      for _, artName in ipairs(PROJECT_ART_NAMES) do
+      for _, artName in ipairs(CFG.PROJECT_ART_NAMES) do
         local path = proj.dir .. '/' .. artName
         if FileExists(path) then
           proj.albumArtPath = path
@@ -2600,6 +2698,10 @@ local function EnrichProjects(projectList)
       end
     end
 
+    -- Default artwork fallback is NOT applied here — it's applied at runtime in
+    -- ApplyCachedMetadata() so changing the setting takes effect immediately without
+    -- a hard refresh. Applying here would bake the path into metadata-cache.json.
+
     if artFound then art_hits = art_hits + 1 end
 
     -- Load tags
@@ -2649,15 +2751,15 @@ local function SortList(list, mode)
   local out = {}
   for i = 1, #list do out[i] = list[i] end
 
-  if mode == SORT_NEWEST then
+  if mode == CFG.SORT_NEWEST then
     table.sort(out, function(a, b) return (a.dateStr or '') > (b.dateStr or '') end)
-  elseif mode == SORT_OLDEST then
+  elseif mode == CFG.SORT_OLDEST then
     table.sort(out, function(a, b) return (a.dateStr or '') < (b.dateStr or '') end)
-  elseif mode == SORT_AZ then
+  elseif mode == CFG.SORT_AZ then
     table.sort(out, function(a, b) return a.name:lower() < b.name:lower() end)
-  elseif mode == SORT_ZA then
+  elseif mode == CFG.SORT_ZA then
     table.sort(out, function(a, b) return a.name:lower() > b.name:lower() end)
-  elseif mode == SORT_ARTIST_AZ then
+  elseif mode == CFG.SORT_ARTIST_AZ then
     -- Sort by confirmed artist only (spicetify match or user override), not filename guess
     -- Optional album grouping: artist → album → title (toggle in Settings)
     table.sort(out, function(a, b)
@@ -2677,7 +2779,7 @@ local function SortList(list, mode)
       local bt = (b.matchedTitle or b.name):lower()
       return at < bt
     end)
-  elseif mode == SORT_TITLE_AZ then
+  elseif mode == CFG.SORT_TITLE_AZ then
     -- Sort by matchedTitle; projects WITH a title come first, then by title A→Z
     table.sort(out, function(a, b)
       local at = (a.matchedTitle or ''):lower()
@@ -2686,6 +2788,11 @@ local function SortList(list, mode)
       if at ~= '' and bt == '' then return true end
       if at ~= bt then return at < bt end
       return a.name:lower() < b.name:lower()
+    end)
+  elseif mode == CFG.SORT_RECENT then
+    -- REAPER.ini order = last-opened order (recent01 = most recently opened)
+    table.sort(out, function(a, b)
+      return (a.recent_index or 9999) < (b.recent_index or 9999)
     end)
   end
 
@@ -2705,7 +2812,7 @@ local function FilterList(list, query)
     -- tonumber() handles both integer 6 and string "6" from project-tags.json
     if pass and S.filter_strings > 1 then
       local str_n = tonumber(tags.strings)
-      if STRING_FILTER_OPTIONS[S.filter_strings] == 'Unset' then
+      if CFG.STRING_FILTER_OPTIONS[S.filter_strings] == 'Unset' then
         if str_n ~= nil then pass = false end  -- 'Unset' = missing strings tag
       else
         if S.filter_strings == 2 and str_n ~= 6 then pass = false end
@@ -2716,7 +2823,7 @@ local function FilterList(list, query)
 
     -- Tuning filter (last option = 'Unset')
     if pass and S.filter_tuning > 1 then
-      local wanted = TUNING_FILTER_OPTIONS[S.filter_tuning]
+      local wanted = CFG.TUNING_FILTER_OPTIONS[S.filter_tuning]
       if wanted == 'Unset' then
         if (tags.tuning or '') ~= '' then pass = false end
       else
@@ -2726,7 +2833,7 @@ local function FilterList(list, query)
 
     -- Status filter (last option = 'Unset')
     if pass and S.filter_status > 1 then
-      local wanted = STATUS_FILTER_OPTIONS[S.filter_status]
+      local wanted = CFG.STATUS_FILTER_OPTIONS[S.filter_status]
       if wanted == 'Unset' then
         if (tags.status or '') ~= '' then pass = false end
       else
@@ -2736,7 +2843,7 @@ local function FilterList(list, query)
 
     -- Genre filter (matches against primary genre only; last option = 'Unset')
     if pass and S.filter_genre > 1 then
-      local wanted = GENRE_FILTER_OPTIONS[S.filter_genre]
+      local wanted = CFG.GENRE_FILTER_OPTIONS[S.filter_genre]
       if wanted == 'Unset' then
         if (GetPrimaryGenre(tags) or '') ~= '' then pass = false end
       else
@@ -3659,7 +3766,7 @@ end
 -- ============================================================================
 
 local function SaveState()
-  local function Set(key, val) reaper.SetExtState(EXT_SECTION, key, tostring(val), true) end
+  local function Set(key, val) reaper.SetExtState(CFG.EXT_SECTION, key, tostring(val), true) end
   Set('default_recent_sort', S.default_recent_sort)
   Set('default_all_sort',    S.default_all_sort)
   Set('artist_sort_by_album', S.artist_sort_by_album and '1' or '0')
@@ -3690,6 +3797,7 @@ local function SaveState()
   Set('grid_show_transpose',  S.grid_show_transpose and '1' or '0')
   Set('grid_tooltip_delay',   tostring(S.grid_tooltip_delay))
   Set('custom_primary_genres', S.custom_primary_genres)
+  Set('custom_statuses', S.custom_statuses)
   Set('accent_color',       S.accent_color)
   Set('theme_preset',       S.theme_preset)
   -- Appearance settings
@@ -3719,9 +3827,14 @@ local function SaveState()
   Set('symlink_src',       S.symlink_src)
   Set('symlink_dest',      S.symlink_dest)
 
+  Set('default_artwork_path', S.default_artwork_path)
+  Set('placeholder_full_name', S.placeholder_full_name and '1' or '0')
   Set('all_projects_path', S.ALL_PROJECTS_PATH)
+  Set('additional_project_paths', table.concat(S.additional_project_paths, '|'))
   Set('all_scan_max_depth', S.ALL_SCAN_MAX_DEPTH)
   Set('image_batch_size',  S.IMAGE_BATCH_SIZE)
+  Set('img_first_frame_ms', S.img_first_frame_ms)
+  Set('img_per_frame_ms',   S.img_per_frame_ms)
   Set('debug_logging',     S.debug_logging and '1' or '0')
   -- Follow Actions
   Set('followaction_load_project', S.followaction_load_project)
@@ -3745,7 +3858,7 @@ local function SaveState()
   -- Include All Projects filter (persisted permanently)
   Set('recent_filter_include_all', S.recent_filter_include_all and '1' or '0')
   -- Session-scoped state (persist=false: lives only while REAPER is running)
-  local function SetSession(key, val) reaper.SetExtState(EXT_SECTION, 's_' .. key, tostring(val), false) end
+  local function SetSession(key, val) reaper.SetExtState(CFG.EXT_SECTION, 's_' .. key, tostring(val), false) end
   SetSession('recent_sort_mode', S.recent_sort_mode)
   SetSession('all_sort_mode',    S.all_sort_mode)
   SetSession('search_buf',       S.search_buf)
@@ -3767,13 +3880,13 @@ local function SaveState()
 end
 
 local function LoadState()
-  local function G(key) return reaper.GetExtState(EXT_SECTION, key) end
+  local function G(key) return reaper.GetExtState(CFG.EXT_SECTION, key) end
 
   -- Default sort modes (persisted permanently, applied on script launch)
   local drs = G('default_recent_sort')
-  if drs ~= '' then S.default_recent_sort = tonumber(drs) or SORT_NEWEST end
+  if drs ~= '' then S.default_recent_sort = tonumber(drs) or CFG.SORT_NEWEST end
   local das = G('default_all_sort')
-  if das ~= '' then S.default_all_sort = tonumber(das) or SORT_AZ end
+  if das ~= '' then S.default_all_sort = tonumber(das) or CFG.SORT_AZ end
   -- Apply defaults as the active sort (session persistence will override later if same session)
   S.recent_sort_mode = S.default_recent_sort
   S.all_sort_mode = S.default_all_sort
@@ -3808,12 +3921,12 @@ local function LoadState()
   if afs ~= '' then S.auto_focus_search = (afs == '1') end
 
   local fs = G('font_size')
-  if fs ~= '' then S.font_size = tonumber(fs) or DEFAULT_FONT_SIZE end
-  S.font_size = math.max(MIN_FONT_SIZE, math.min(MAX_FONT_SIZE, S.font_size))
+  if fs ~= '' then S.font_size = tonumber(fs) or CFG.DEFAULT_FONT_SIZE end
+  S.font_size = math.max(CFG.MIN_FONT_SIZE, math.min(CFG.MAX_FONT_SIZE, S.font_size))
 
   local as = G('art_size')
-  if as ~= '' then S.art_size = tonumber(as) or DEFAULT_ART_SIZE end
-  S.art_size = math.max(MIN_ART_SIZE, math.min(MAX_ART_SIZE, S.art_size))
+  if as ~= '' then S.art_size = tonumber(as) or CFG.DEFAULT_ART_SIZE end
+  S.art_size = math.max(CFG.MIN_ART_SIZE, math.min(CFG.MAX_ART_SIZE, S.art_size))
 
   local gcols = G('grid_cols')
   if gcols ~= '' then S.grid_cols = tonumber(gcols) or 5 end
@@ -3823,12 +3936,12 @@ local function LoadState()
   S.grid_spacing = math.max(0, math.min(32, S.grid_spacing))
   -- Legacy: grid_card_size still loaded for potential future use
   local gcs = G('grid_card_size')
-  if gcs ~= '' then S.grid_card_size = tonumber(gcs) or DEFAULT_GRID_CARD_SIZE end
-  S.grid_card_size = math.max(MIN_GRID_CARD_SIZE, math.min(MAX_GRID_CARD_SIZE, S.grid_card_size))
+  if gcs ~= '' then S.grid_card_size = tonumber(gcs) or CFG.DEFAULT_GRID_CARD_SIZE end
+  S.grid_card_size = math.max(CFG.MIN_GRID_CARD_SIZE, math.min(CFG.MAX_GRID_CARD_SIZE, S.grid_card_size))
 
   local glh = G('grid_line_h')
-  if glh ~= '' then S.grid_line_h = tonumber(glh) or DEFAULT_GRID_LINE_H end
-  S.grid_line_h = math.max(MIN_GRID_LINE_H, math.min(MAX_GRID_LINE_H, S.grid_line_h))
+  if glh ~= '' then S.grid_line_h = tonumber(glh) or CFG.DEFAULT_GRID_LINE_H end
+  S.grid_line_h = math.max(CFG.MIN_GRID_LINE_H, math.min(CFG.MAX_GRID_LINE_H, S.grid_line_h))
 
   local sap = G('show_art_placeholder')
   if sap ~= '' then S.show_art_placeholder = (sap == '1') end
@@ -3865,6 +3978,9 @@ local function LoadState()
   local cpg = G('custom_primary_genres')
   if cpg ~= '' then S.custom_primary_genres = cpg end
   RebuildGenreLists()
+  local cst = G('custom_statuses')
+  if cst ~= '' then S.custom_statuses = cst end
+  RebuildStatusLists()
 
   -- Accent color / theme preset
   local ac = G('accent_color')
@@ -3912,6 +4028,19 @@ local function LoadState()
     end
   end
 
+  local appaths = G('additional_project_paths')
+  if appaths ~= '' then
+    S.additional_project_paths = {}
+    for p in appaths:gmatch('[^|]+') do
+      if p ~= '' then S.additional_project_paths[#S.additional_project_paths + 1] = p end
+    end
+  end
+
+  local dap = G('default_artwork_path')
+  if dap ~= '' then S.default_artwork_path = dap end
+  local pfn = G('placeholder_full_name')
+  if pfn ~= '' then S.placeholder_full_name = (pfn == '1') end
+
   local es = G('enable_spicetify')
   if es ~= '' then S.enable_spicetify = (es == '1') end
   local sdp = G('spicetify_db_path')
@@ -3930,6 +4059,13 @@ local function LoadState()
   local ibs = G('image_batch_size')
   if ibs ~= '' then S.IMAGE_BATCH_SIZE = tonumber(ibs) or 5 end
   S.IMAGE_BATCH_SIZE = math.max(1, math.min(20, S.IMAGE_BATCH_SIZE))
+
+  local iffm = G('img_first_frame_ms')
+  if iffm ~= '' then S.img_first_frame_ms = tonumber(iffm) or 32 end
+  S.img_first_frame_ms = math.max(4, math.min(500, S.img_first_frame_ms))
+  local ipfm = G('img_per_frame_ms')
+  if ipfm ~= '' then S.img_per_frame_ms = tonumber(ipfm) or 16 end
+  S.img_per_frame_ms = math.max(4, math.min(200, S.img_per_frame_ms))
 
   local dbg = G('debug_logging')
   if dbg ~= '' then S.debug_logging = (dbg == '1') end
@@ -4004,7 +4140,7 @@ local function LoadState()
 
   -- Session state restoration (persist=false: only exists within same REAPER session)
   -- These override defaults when re-opening the script within the same REAPER session
-  local function GS(key) return reaper.GetExtState(EXT_SECTION, 's_' .. key) end
+  local function GS(key) return reaper.GetExtState(CFG.EXT_SECTION, 's_' .. key) end
   local s_rsm = GS('recent_sort_mode')
   if s_rsm ~= '' then S.recent_sort_mode = tonumber(s_rsm) or S.default_recent_sort end
   local s_asm = GS('all_sort_mode')
@@ -4322,9 +4458,9 @@ local function DrawTopBar()
 
   -- Sort combo
   ImGui.SetNextItemWidth(ctx, 120)
-  if ImGui.BeginCombo(ctx, '##sort', SORT_LABELS[S.sort_mode]) then
-    for i = 1, #SORT_LABELS do
-      if ImGui.Selectable(ctx, SORT_LABELS[i], S.sort_mode == i) then
+  if ImGui.BeginCombo(ctx, '##sort', CFG.SORT_LABELS[S.sort_mode]) then
+    for i = 1, #CFG.SORT_LABELS do
+      if ImGui.Selectable(ctx, CFG.SORT_LABELS[i], S.sort_mode == i) then
         S.sort_mode = i
         -- Persist to the active tab's sort mode
         if S.active_tab == 'all' then
@@ -4368,8 +4504,8 @@ local function DrawFilterBar()
 
   -- String count filter
   ImGui.SetNextItemWidth(ctx, 80)
-  if ImGui.BeginCombo(ctx, '##flt_strings', STRING_FILTER_OPTIONS[S.filter_strings]) then
-    for i, label in ipairs(STRING_FILTER_OPTIONS) do
+  if ImGui.BeginCombo(ctx, '##flt_strings', CFG.STRING_FILTER_OPTIONS[S.filter_strings]) then
+    for i, label in ipairs(CFG.STRING_FILTER_OPTIONS) do
       if ImGui.Selectable(ctx, label .. '##sf' .. i, S.filter_strings == i) then
         S.filter_strings = i
         RefreshFiltered()
@@ -4383,8 +4519,8 @@ local function DrawFilterBar()
 
   -- Tuning filter
   ImGui.SetNextItemWidth(ctx, 100)
-  if ImGui.BeginCombo(ctx, '##flt_tuning', TUNING_FILTER_OPTIONS[S.filter_tuning]) then
-    for i, label in ipairs(TUNING_FILTER_OPTIONS) do
+  if ImGui.BeginCombo(ctx, '##flt_tuning', CFG.TUNING_FILTER_OPTIONS[S.filter_tuning]) then
+    for i, label in ipairs(CFG.TUNING_FILTER_OPTIONS) do
       if ImGui.Selectable(ctx, label .. '##tf' .. i, S.filter_tuning == i) then
         S.filter_tuning = i
         RefreshFiltered()
@@ -4398,8 +4534,8 @@ local function DrawFilterBar()
 
   -- Status filter
   ImGui.SetNextItemWidth(ctx, 120)
-  if ImGui.BeginCombo(ctx, '##flt_status', STATUS_FILTER_OPTIONS[S.filter_status]) then
-    for i, label in ipairs(STATUS_FILTER_OPTIONS) do
+  if ImGui.BeginCombo(ctx, '##flt_status', CFG.STATUS_FILTER_OPTIONS[S.filter_status]) then
+    for i, label in ipairs(CFG.STATUS_FILTER_OPTIONS) do
       if ImGui.Selectable(ctx, label .. '##stf' .. i, S.filter_status == i) then
         S.filter_status = i
         RefreshFiltered()
@@ -4412,10 +4548,10 @@ local function DrawFilterBar()
   ImGui.SameLine(ctx)
 
   -- Genre filter
-  local genre_label = GENRE_FILTER_OPTIONS[S.filter_genre] or 'All'
+  local genre_label = CFG.GENRE_FILTER_OPTIONS[S.filter_genre] or 'All'
   ImGui.SetNextItemWidth(ctx, 100)
   if ImGui.BeginCombo(ctx, '##flt_genre', genre_label) then
-    for i, label in ipairs(GENRE_FILTER_OPTIONS) do
+    for i, label in ipairs(CFG.GENRE_FILTER_OPTIONS) do
       if ImGui.Selectable(ctx, label .. '##gf' .. i, S.filter_genre == i) then
         S.filter_genre = i
         RefreshFiltered()
@@ -4643,7 +4779,7 @@ local function DrawContextMenu(proj, idx)
       -- Bulk tag assignment
       ImGui.Separator(ctx)
       if ImGui.BeginMenu(ctx, 'Set Status') then
-        for _, s in ipairs(STATUS_PRESETS) do
+        for _, s in ipairs(CFG.STATUS_PRESETS) do
           if ImGui.Selectable(ctx, s .. '##bst', false) then
             for _, p in ipairs(GetSelectedProjects()) do
               SetTag(p.path, 'status', s)
@@ -4675,7 +4811,7 @@ local function DrawContextMenu(proj, idx)
         ImGui.EndMenu(ctx)
       end
       if ImGui.BeginMenu(ctx, 'Set Tuning') then
-        for _, t in ipairs(TUNING_PRESETS) do
+        for _, t in ipairs(CFG.TUNING_PRESETS) do
           if ImGui.Selectable(ctx, t .. '##btn', false) then
             for _, p in ipairs(GetSelectedProjects()) do
               SetTag(p.path, 'tuning', t)
@@ -4691,7 +4827,7 @@ local function DrawContextMenu(proj, idx)
         ImGui.EndMenu(ctx)
       end
       if ImGui.BeginMenu(ctx, 'Set Transpose') then
-        for _, t in ipairs(TRANSPOSE_PRESETS) do
+        for _, t in ipairs(CFG.TRANSPOSE_PRESETS) do
           if ImGui.Selectable(ctx, t .. '##btp', false) then
             for _, p in ipairs(GetSelectedProjects()) do
               SetTag(p.path, 'transpose', t)
@@ -4707,7 +4843,7 @@ local function DrawContextMenu(proj, idx)
         ImGui.EndMenu(ctx)
       end
       if ImGui.BeginMenu(ctx, 'Set Genre') then
-        for _, g in ipairs(PRIMARY_GENRES) do
+        for _, g in ipairs(CFG.PRIMARY_GENRES) do
           if ImGui.Selectable(ctx, g .. '##bgn', false) then
             for _, p in ipairs(GetSelectedProjects()) do
               local t = GetTags(p.path)
@@ -4838,7 +4974,7 @@ local function DrawContextMenu(proj, idx)
       -- Quick tag assignment submenus (single project)
       if ImGui.BeginMenu(ctx, 'Set Status##single') then
         local cur_status = tags.status or ''
-        for _, s in ipairs(STATUS_PRESETS) do
+        for _, s in ipairs(CFG.STATUS_PRESETS) do
           local is_current = (cur_status == s)
           if ImGui.Selectable(ctx, (is_current and '> ' or '') .. s .. '##sst', is_current) then
             SetTag(proj.path, 'status', s)
@@ -4878,7 +5014,7 @@ local function DrawContextMenu(proj, idx)
       end
       if ImGui.BeginMenu(ctx, 'Set Tuning##single') then
         local cur_tuning = tags.tuning or ''
-        for _, t in ipairs(TUNING_PRESETS) do
+        for _, t in ipairs(CFG.TUNING_PRESETS) do
           local is_current = (cur_tuning == t)
           if ImGui.Selectable(ctx, (is_current and '> ' or '') .. t .. '##stn', is_current) then
             SetTag(proj.path, 'tuning', t)
@@ -4898,7 +5034,7 @@ local function DrawContextMenu(proj, idx)
       end
       if ImGui.BeginMenu(ctx, 'Set Transpose##single') then
         local cur_tp = tags.transpose or ''
-        for _, t in ipairs(TRANSPOSE_PRESETS) do
+        for _, t in ipairs(CFG.TRANSPOSE_PRESETS) do
           local is_current = (cur_tp == t)
           if ImGui.Selectable(ctx, (is_current and '> ' or '') .. t .. '##stp', is_current) then
             SetTag(proj.path, 'transpose', t)
@@ -4918,7 +5054,7 @@ local function DrawContextMenu(proj, idx)
       end
       if ImGui.BeginMenu(ctx, 'Set Genre##single') then
         local cur_genre = GetPrimaryGenre(tags) or ''
-        for _, g in ipairs(PRIMARY_GENRES) do
+        for _, g in ipairs(CFG.PRIMARY_GENRES) do
           local is_current = (cur_genre == g)
           if ImGui.Selectable(ctx, (is_current and '> ' or '') .. g .. '##sgn', is_current) then
             -- Set as primary genre, preserve secondary genres
@@ -5094,7 +5230,7 @@ local function DrawTagEditor()
   local status_label = tag_edit.status ~= '' and tag_edit.status or '(none)'
   if ImGui.BeginCombo(ctx, '##ed_status', status_label) then
     if ImGui.Selectable(ctx, '(none)##st', tag_edit.status == '') then tag_edit.status = '' end
-    for _, s in ipairs(STATUS_PRESETS) do
+    for _, s in ipairs(CFG.STATUS_PRESETS) do
       if ImGui.Selectable(ctx, s .. '##st', tag_edit.status == s) then tag_edit.status = s end
     end
     ImGui.EndCombo(ctx)
@@ -5108,7 +5244,7 @@ local function DrawTagEditor()
   local tuning_label = tag_edit.tuning ~= '' and tag_edit.tuning or '(none)'
   if ImGui.BeginCombo(ctx, '##ed_tuning', tuning_label) then
     if ImGui.Selectable(ctx, '(none)##tn', tag_edit.tuning == '') then tag_edit.tuning = '' end
-    for _, t in ipairs(TUNING_PRESETS) do
+    for _, t in ipairs(CFG.TUNING_PRESETS) do
       if ImGui.Selectable(ctx, t .. '##tn', tag_edit.tuning == t) then tag_edit.tuning = t end
     end
     ImGui.EndCombo(ctx)
@@ -5122,7 +5258,7 @@ local function DrawTagEditor()
   local tp_label = tag_edit.transpose ~= '' and tag_edit.transpose or '(none)'
   if ImGui.BeginCombo(ctx, '##ed_transpose', tp_label) then
     if ImGui.Selectable(ctx, '(none)##tp', tag_edit.transpose == '') then tag_edit.transpose = '' end
-    for _, t in ipairs(TRANSPOSE_PRESETS) do
+    for _, t in ipairs(CFG.TRANSPOSE_PRESETS) do
       if ImGui.Selectable(ctx, t .. '##tp', tag_edit.transpose == t) then tag_edit.transpose = t end
     end
     ImGui.EndCombo(ctx)
@@ -5136,7 +5272,7 @@ local function DrawTagEditor()
   local guitar_label = tag_edit.guitar ~= '' and tag_edit.guitar or '(none)'
   if ImGui.BeginCombo(ctx, '##ed_guitar', guitar_label) then
     if ImGui.Selectable(ctx, '(none)##gt', tag_edit.guitar == '') then tag_edit.guitar = '' end
-    for _, g in ipairs(GUITAR_PRESETS) do
+    for _, g in ipairs(CFG.GUITAR_PRESETS) do
       if g == 'Custom' then
         ImGui.Separator(ctx)
         if ImGui.Selectable(ctx, 'Custom...##gt', false) then tag_edit.guitar = 'Custom' end
@@ -5148,7 +5284,7 @@ local function DrawTagEditor()
   end
   -- Show text input below if Custom is selected (or value doesn't match any preset)
   local is_guitar_preset = false
-  for _, g in ipairs(GUITAR_PRESETS) do
+  for _, g in ipairs(CFG.GUITAR_PRESETS) do
     if g ~= 'Custom' and tag_edit.guitar == g then is_guitar_preset = true; break end
   end
   if tag_edit.guitar ~= '' and not is_guitar_preset then
@@ -5173,7 +5309,7 @@ local function DrawTagEditor()
   local genre_label = tag_edit.genre_primary ~= '' and tag_edit.genre_primary or '(none)'
   if ImGui.BeginCombo(ctx, '##ed_genre_primary', genre_label) then
     if ImGui.Selectable(ctx, '(none)##gp', tag_edit.genre_primary == '') then tag_edit.genre_primary = '' end
-    for _, g in ipairs(PRIMARY_GENRES) do
+    for _, g in ipairs(CFG.PRIMARY_GENRES) do
       if ImGui.Selectable(ctx, g .. '##gp', tag_edit.genre_primary == g) then tag_edit.genre_primary = g end
     end
     ImGui.EndCombo(ctx)
@@ -5195,7 +5331,7 @@ local function DrawTagEditor()
   local diff_label = tag_edit.difficulty ~= '' and tag_edit.difficulty or '(none)'
   if ImGui.BeginCombo(ctx, '##ed_diff', diff_label) then
     if ImGui.Selectable(ctx, '(none)##df', tag_edit.difficulty == '') then tag_edit.difficulty = '' end
-    for _, d in ipairs(DIFFICULTY_PRESETS) do
+    for _, d in ipairs(CFG.DIFFICULTY_PRESETS) do
       if ImGui.Selectable(ctx, d .. '##df', tag_edit.difficulty == d) then tag_edit.difficulty = d end
     end
     ImGui.EndCombo(ctx)
@@ -5486,7 +5622,7 @@ local function DrawBulkTagEditor()
     ImGui.SetNextItemWidth(ctx, -1)
     local st_label = bulk_edit.status ~= '' and bulk_edit.status or '(select)'
     if ImGui.BeginCombo(ctx, '##bk_status_val', st_label) then
-      for _, s in ipairs(STATUS_PRESETS) do
+      for _, s in ipairs(CFG.STATUS_PRESETS) do
         if ImGui.Selectable(ctx, s .. '##bkst', bulk_edit.status == s) then bulk_edit.status = s end
       end
       ImGui.EndCombo(ctx)
@@ -5505,7 +5641,7 @@ local function DrawBulkTagEditor()
     ImGui.SetNextItemWidth(ctx, -1)
     local tn_label = bulk_edit.tuning ~= '' and bulk_edit.tuning or '(select)'
     if ImGui.BeginCombo(ctx, '##bk_tuning_val', tn_label) then
-      for _, t in ipairs(TUNING_PRESETS) do
+      for _, t in ipairs(CFG.TUNING_PRESETS) do
         if ImGui.Selectable(ctx, t .. '##bktn', bulk_edit.tuning == t) then bulk_edit.tuning = t end
       end
       ImGui.EndCombo(ctx)
@@ -5524,7 +5660,7 @@ local function DrawBulkTagEditor()
     ImGui.SetNextItemWidth(ctx, -1)
     local tp_label = bulk_edit.transpose ~= '' and bulk_edit.transpose or '(select)'
     if ImGui.BeginCombo(ctx, '##bk_transpose_val', tp_label) then
-      for _, t in ipairs(TRANSPOSE_PRESETS) do
+      for _, t in ipairs(CFG.TRANSPOSE_PRESETS) do
         if ImGui.Selectable(ctx, t .. '##bktp', bulk_edit.transpose == t) then bulk_edit.transpose = t end
       end
       ImGui.EndCombo(ctx)
@@ -5543,7 +5679,7 @@ local function DrawBulkTagEditor()
     ImGui.SetNextItemWidth(ctx, -1)
     local df_label = bulk_edit.difficulty ~= '' and bulk_edit.difficulty or '(select)'
     if ImGui.BeginCombo(ctx, '##bk_diff_val', df_label) then
-      for _, d in ipairs(DIFFICULTY_PRESETS) do
+      for _, d in ipairs(CFG.DIFFICULTY_PRESETS) do
         if ImGui.Selectable(ctx, d .. '##bkdf', bulk_edit.difficulty == d) then bulk_edit.difficulty = d end
       end
       ImGui.EndCombo(ctx)
@@ -5562,7 +5698,7 @@ local function DrawBulkTagEditor()
     ImGui.SetNextItemWidth(ctx, -1)
     local gt_label = bulk_edit.guitar ~= '' and bulk_edit.guitar or '(select)'
     if ImGui.BeginCombo(ctx, '##bk_guitar_val', gt_label) then
-      for _, g in ipairs(GUITAR_PRESETS) do
+      for _, g in ipairs(CFG.GUITAR_PRESETS) do
         if g == 'Custom' then
           ImGui.Separator(ctx)
           if ImGui.Selectable(ctx, 'Custom...##bkgt', false) then bulk_edit.guitar = 'Custom' end
@@ -5574,7 +5710,7 @@ local function DrawBulkTagEditor()
     end
     -- Custom guitar input
     local is_preset = false
-    for _, g in ipairs(GUITAR_PRESETS) do
+    for _, g in ipairs(CFG.GUITAR_PRESETS) do
       if g ~= 'Custom' and bulk_edit.guitar == g then is_preset = true; break end
     end
     if bulk_edit.guitar ~= '' and not is_preset then
@@ -5610,7 +5746,7 @@ local function DrawBulkTagEditor()
     ImGui.SetNextItemWidth(ctx, -1)
     local gp_label = bulk_edit.genre_primary ~= '' and bulk_edit.genre_primary or '(select)'
     if ImGui.BeginCombo(ctx, '##bk_genre_primary', gp_label) then
-      for _, g in ipairs(PRIMARY_GENRES) do
+      for _, g in ipairs(CFG.PRIMARY_GENRES) do
         if ImGui.Selectable(ctx, g .. '##bkgp', bulk_edit.genre_primary == g) then bulk_edit.genre_primary = g end
       end
       ImGui.EndCombo(ctx)
@@ -5927,7 +6063,7 @@ local function DrawProjectList()
        or S.filter_exclude_recents or S.filter_include_all or S.show_dedupe ~= 1 then
       ImGui.Text(ctx, 'No projects match your filters.')
     else
-      if S.active_tab == 'all' and S.ALL_PROJECTS_PATH == '' then
+      if S.active_tab == 'all' and S.ALL_PROJECTS_PATH == '' and #S.additional_project_paths == 0 then
         ImGui.Text(ctx, 'Scan path not configured — set it in Settings → All Projects')
       else
         ImGui.Text(ctx, S.active_tab == 'all' and 'No projects found.' or 'No recent projects found.')
@@ -6132,10 +6268,7 @@ local function DrawProjectList()
       info_parts[#info_parts + 1] = tuning_str
     end
     if tags.status then
-      local sc = STATUS_COLORS[tags.status]
-      if sc then
-        info_parts[#info_parts + 1] = tags.status
-      end
+      info_parts[#info_parts + 1] = tags.status
     end
     if #info_parts > 0 then
       ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
@@ -6208,7 +6341,7 @@ local function DrawGridView()
        or S.filter_exclude_recents or S.filter_include_all or S.show_dedupe ~= 1 then
       ImGui.Text(ctx, 'No projects match your filters.')
     else
-      if S.active_tab == 'all' and S.ALL_PROJECTS_PATH == '' then
+      if S.active_tab == 'all' and S.ALL_PROJECTS_PATH == '' and #S.additional_project_paths == 0 then
         ImGui.Text(ctx, 'Scan path not configured — set it in Settings → All Projects')
       else
         ImGui.Text(ctx, S.active_tab == 'all' and 'No projects found.' or 'No recent projects found.')
@@ -6363,13 +6496,11 @@ local function DrawGridView()
 
       -- Status badge (optional)
       if S.grid_show_status and tags.status then
-        local sc = STATUS_COLORS[tags.status]
-        if sc then
-          ImGui.SetCursorScreenPos(ctx, pad_x, cur_y)
-          ImGui.PushStyleColor(ctx, ImGui.Col_Text, sc)
-          ImGui.Text(ctx, tags.status)
-          ImGui.PopStyleColor(ctx, 1)
-        end
+        local sc = CFG.STATUS_COLORS[tags.status] or CFG.STATUS_DEFAULT_COLOR
+        ImGui.SetCursorScreenPos(ctx, pad_x, cur_y)
+        ImGui.PushStyleColor(ctx, ImGui.Col_Text, sc)
+        ImGui.Text(ctx, tags.status)
+        ImGui.PopStyleColor(ctx, 1)
         cur_y = cur_y + line_h
       end
 
@@ -6556,7 +6687,7 @@ local function DrawActionBar()
   ImGui.PopStyleColor(ctx, 1)
   ImGui.SameLine(ctx, 0, 4)
   ImGui.SetNextItemWidth(ctx, 100)
-  local fs_chg, fs_val = ImGui.SliderInt(ctx, '##font_slider', S.font_size, MIN_FONT_SIZE, MAX_FONT_SIZE, '%dpx')
+  local fs_chg, fs_val = ImGui.SliderInt(ctx, '##font_slider', S.font_size, CFG.MIN_FONT_SIZE, CFG.MAX_FONT_SIZE, '%dpx')
   if fs_chg then
     S.font_size = fs_val
     SaveState()
@@ -6580,7 +6711,7 @@ local function DrawActionBar()
     ImGui.PopStyleColor(ctx, 1)
     ImGui.SameLine(ctx, 0, 4)
     ImGui.SetNextItemWidth(ctx, 100)
-    local as_chg, as_val = ImGui.SliderInt(ctx, '##art_slider', S.art_size, MIN_ART_SIZE, MAX_ART_SIZE, '%dpx')
+    local as_chg, as_val = ImGui.SliderInt(ctx, '##art_slider', S.art_size, CFG.MIN_ART_SIZE, CFG.MAX_ART_SIZE, '%dpx')
     if as_chg then
       S.art_size = as_val
       SaveState()
@@ -6833,6 +6964,40 @@ local function DrawSettingsTab()
     local sp_changed, sp_new = ImGui.InputText(ctx, '##scan_path', S.ALL_PROJECTS_PATH)
     if sp_changed then S.ALL_PROJECTS_PATH = sp_new; changed = true end
 
+    -- Additional project paths
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Additional Paths:')
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, 'Additional folders to scan for projects.\nAll folders are scanned recursively and merged.\nRequires Hard Refresh (Shift+F5) to take effect.')
+    end
+    ImGui.SameLine(ctx, lbl_w)
+    if ImGui.SmallButton(ctx, '+ Add Path##add_path') then
+      local rv, folder = reaper.JS_Dialog_BrowseForFolder('Select additional projects folder', '')
+      if rv == 1 and folder and folder ~= '' then
+        S.additional_project_paths[#S.additional_project_paths + 1] = folder
+        changed = true
+      end
+    end
+
+    -- Display existing additional paths with remove buttons
+    local remove_idx = nil
+    for i, p in ipairs(S.additional_project_paths) do
+      ImGui.SetCursorPosX(ctx, lbl_w)
+      ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
+      ImGui.Text(ctx, p)
+      ImGui.PopStyleColor(ctx, 1)
+      ImGui.SameLine(ctx)
+      if ImGui.SmallButton(ctx, 'X##rm_path_' .. i) then
+        remove_idx = i
+      end
+    end
+    if remove_idx then
+      table.remove(S.additional_project_paths, remove_idx)
+      changed = true
+    end
+
+    ImGui.Spacing(ctx)
+
     -- Max scan depth
     ImGui.AlignTextToFramePadding(ctx)
     ImGui.Text(ctx, 'Max Scan Depth:')
@@ -6859,7 +7024,7 @@ local function DrawSettingsTab()
     ImGui.Text(ctx, 'Font Size:')
     ImGui.SameLine(ctx, lbl_w)
     ImGui.SetNextItemWidth(ctx, 200)
-    local fs_changed, fs_new = ImGui.SliderInt(ctx, '##font_size', S.font_size, MIN_FONT_SIZE, MAX_FONT_SIZE)
+    local fs_changed, fs_new = ImGui.SliderInt(ctx, '##font_size', S.font_size, CFG.MIN_FONT_SIZE, CFG.MAX_FONT_SIZE)
     if fs_changed then S.font_size = fs_new; changed = true end
 
     -- Art thumbnail size
@@ -6867,7 +7032,7 @@ local function DrawSettingsTab()
     ImGui.Text(ctx, 'Art Thumbnail Size:')
     ImGui.SameLine(ctx, lbl_w)
     ImGui.SetNextItemWidth(ctx, 200)
-    local as_changed, as_new = ImGui.SliderInt(ctx, '##art_size', S.art_size, MIN_ART_SIZE, MAX_ART_SIZE)
+    local as_changed, as_new = ImGui.SliderInt(ctx, '##art_size', S.art_size, CFG.MIN_ART_SIZE, CFG.MAX_ART_SIZE)
     if as_changed then S.art_size = as_new; changed = true end
 
     -- Grid column count
@@ -6878,7 +7043,7 @@ local function DrawSettingsTab()
     local gcol_changed, gcol_new = ImGui.SliderInt(ctx, '##grid_cols_setting', S.grid_cols, 2, 10)
     if gcol_changed then S.grid_cols = gcol_new; changed = true end
     -- Hidden: grid card size (kept for potential future backend use)
-    -- local gcs_changed, gcs_new = ImGui.SliderInt(ctx, '##grid_card_size', S.grid_card_size, MIN_GRID_CARD_SIZE, MAX_GRID_CARD_SIZE)
+    -- local gcs_changed, gcs_new = ImGui.SliderInt(ctx, '##grid_card_size', S.grid_card_size, CFG.MIN_GRID_CARD_SIZE, CFG.MAX_GRID_CARD_SIZE)
     -- if gcs_changed then S.grid_card_size = gcs_new; changed = true end
 
     ImGui.Spacing(ctx)
@@ -6889,6 +7054,29 @@ local function DrawSettingsTab()
     ImGui.SameLine(ctx, lbl_w)
     local ap_changed, ap_new = ImGui.Checkbox(ctx, 'Show initials for missing art##ap', S.show_art_placeholder)
     if ap_changed then S.show_art_placeholder = ap_new; changed = true end
+
+    if S.show_art_placeholder then
+      ImGui.SameLine(ctx)
+      local pfn_chg, pfn_new = ImGui.Checkbox(ctx, 'Full name instead of initials##pfn', S.placeholder_full_name)
+      if pfn_chg then S.placeholder_full_name = pfn_new; changed = true end
+    end
+
+    -- Default artwork
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Default Artwork:')
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Fallback image shown when a project has no album art.\nLeave empty to use placeholder initials/name instead.') end
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, -60)
+    local da_chg, da_new = ImGui.InputText(ctx, '##default_artwork_path', S.default_artwork_path)
+    if da_chg then S.default_artwork_path = da_new; changed = true end
+    ImGui.SameLine(ctx)
+    if ImGui.SmallButton(ctx, 'Browse##dart') then
+      local rv, path = reaper.JS_Dialog_BrowseForOpenFiles('Select Default Artwork', '', '', 'Image files\0*.jpg;*.jpeg;*.png\0All files\0*.*\0', false)
+      if rv == 1 and path and path ~= '' then
+        S.default_artwork_path = path
+        changed = true
+      end
+    end
 
     ImGui.Spacing(ctx)
 
@@ -6966,7 +7154,7 @@ local function DrawSettingsTab()
     ImGui.Text(ctx, 'Grid Text Height:')
     ImGui.SameLine(ctx, lbl_w)
     ImGui.SetNextItemWidth(ctx, 200)
-    local glh_changed, glh_new = ImGui.SliderInt(ctx, '##grid_line_h', S.grid_line_h, MIN_GRID_LINE_H, MAX_GRID_LINE_H)
+    local glh_changed, glh_new = ImGui.SliderInt(ctx, '##grid_line_h', S.grid_line_h, CFG.MIN_GRID_LINE_H, CFG.MAX_GRID_LINE_H)
     if glh_changed then S.grid_line_h = glh_new; changed = true end
     if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Line height for text under grid cards (px)') end
 
@@ -6983,6 +7171,19 @@ local function DrawSettingsTab()
     end
     if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Comma-separated list of primary genres.\nUsed in dropdowns, quick-set menus, and genre filter.\nChanges take effect when you leave this field.') end
 
+    -- Custom statuses
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Custom Statuses:')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, 350)
+    local cst_chg, cst_new = ImGui.InputText(ctx, '##custom_statuses', S.custom_statuses)
+    if cst_chg then S.custom_statuses = cst_new end
+    if ImGui.IsItemDeactivatedAfterEdit(ctx) then
+      RebuildStatusLists()
+      changed = true
+    end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Comma-separated list of additional custom statuses.\nAppended to the built-in status list.\nLeave empty for built-in statuses only.') end
+
     ImGui.Spacing(ctx)
 
     -- Default sort order per tab
@@ -6990,9 +7191,9 @@ local function DrawSettingsTab()
     ImGui.Text(ctx, 'Default Sort (Recent):')
     ImGui.SameLine(ctx, lbl_w)
     ImGui.SetNextItemWidth(ctx, 200)
-    if ImGui.BeginCombo(ctx, '##default_sort_recent', SORT_LABELS[S.default_recent_sort]) then
-      for i = 1, #SORT_LABELS do
-        if ImGui.Selectable(ctx, SORT_LABELS[i], S.default_recent_sort == i) then
+    if ImGui.BeginCombo(ctx, '##default_sort_recent', CFG.SORT_LABELS[S.default_recent_sort]) then
+      for i = 1, #CFG.SORT_LABELS do
+        if ImGui.Selectable(ctx, CFG.SORT_LABELS[i], S.default_recent_sort == i) then
           S.default_recent_sort = i
           changed = true
         end
@@ -7003,9 +7204,9 @@ local function DrawSettingsTab()
     ImGui.Text(ctx, 'Default Sort (All):')
     ImGui.SameLine(ctx, lbl_w)
     ImGui.SetNextItemWidth(ctx, 200)
-    if ImGui.BeginCombo(ctx, '##default_sort_all', SORT_LABELS[S.default_all_sort]) then
-      for i = 1, #SORT_LABELS do
-        if ImGui.Selectable(ctx, SORT_LABELS[i], S.default_all_sort == i) then
+    if ImGui.BeginCombo(ctx, '##default_sort_all', CFG.SORT_LABELS[S.default_all_sort]) then
+      for i = 1, #CFG.SORT_LABELS do
+        if ImGui.Selectable(ctx, CFG.SORT_LABELS[i], S.default_all_sort == i) then
           S.default_all_sort = i
           changed = true
         end
@@ -7227,11 +7428,11 @@ local function DrawSettingsTab()
     for slot = 1, 3 do
       if slot > 1 then ImGui.SameLine(ctx, 0, 4) end
       local slot_key = 'custom_theme_' .. slot
-      local has_saved = (reaper.GetExtState(EXT_SECTION, slot_key) ~= '')
+      local has_saved = (reaper.GetExtState(CFG.EXT_SECTION, slot_key) ~= '')
       -- Load button
       if not has_saved then ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDisabled) end
       if ImGui.SmallButton(ctx, slot .. '##load_theme') and has_saved then
-        local data = reaper.GetExtState(EXT_SECTION, slot_key)
+        local data = reaper.GetExtState(CFG.EXT_SECTION, slot_key)
         local vals = {}
         for v in data:gmatch('[^|]+') do vals[#vals+1] = v end
         if #vals >= 10 then
@@ -7262,7 +7463,7 @@ local function DrawSettingsTab()
           S.corner_rounding, S.density,
           S.show_borders and '1' or '0', S.alt_row_bg and '1' or '0'
         }, '|')
-        reaper.SetExtState(EXT_SECTION, slot_key, data, true)
+        reaper.SetExtState(CFG.EXT_SECTION, slot_key, data, true)
       end
     end
     if ImGui.IsItemHovered(ctx) then end  -- tooltip handled above per-button
@@ -7327,9 +7528,9 @@ local function DrawSettingsTab()
     ImGui.Text(ctx, 'Default Sort (Recent):')
     ImGui.SameLine(ctx, lbl_w)
     ImGui.SetNextItemWidth(ctx, 150)
-    if ImGui.BeginCombo(ctx, '##def_sort_recent', SORT_LABELS[S.recent_sort_mode]) then
-      for i = 1, #SORT_LABELS do
-        if ImGui.Selectable(ctx, SORT_LABELS[i] .. '##dsr' .. i, S.recent_sort_mode == i) then
+    if ImGui.BeginCombo(ctx, '##def_sort_recent', CFG.SORT_LABELS[S.recent_sort_mode]) then
+      for i = 1, #CFG.SORT_LABELS do
+        if ImGui.Selectable(ctx, CFG.SORT_LABELS[i] .. '##dsr' .. i, S.recent_sort_mode == i) then
           S.recent_sort_mode = i
           if S.active_tab == 'recent' then S.sort_mode = i; RefreshFiltered() end
           changed = true
@@ -7343,9 +7544,9 @@ local function DrawSettingsTab()
     ImGui.Text(ctx, 'Default Sort (All):')
     ImGui.SameLine(ctx, lbl_w)
     ImGui.SetNextItemWidth(ctx, 150)
-    if ImGui.BeginCombo(ctx, '##def_sort_all', SORT_LABELS[S.all_sort_mode]) then
-      for i = 1, #SORT_LABELS do
-        if ImGui.Selectable(ctx, SORT_LABELS[i] .. '##dsa' .. i, S.all_sort_mode == i) then
+    if ImGui.BeginCombo(ctx, '##def_sort_all', CFG.SORT_LABELS[S.all_sort_mode]) then
+      for i = 1, #CFG.SORT_LABELS do
+        if ImGui.Selectable(ctx, CFG.SORT_LABELS[i] .. '##dsa' .. i, S.all_sort_mode == i) then
           S.all_sort_mode = i
           if S.active_tab == 'all' then S.sort_mode = i; RefreshFiltered() end
           changed = true
@@ -7593,6 +7794,41 @@ local function DrawSettingsTab()
     -- if ib_changed then S.IMAGE_BATCH_SIZE = ib_new; changed = true end
     -- if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Images loaded per frame during startup.\nHigher = faster loading, lower = smoother UI.') end
 
+    -- Image loading budgets (text inputs)
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'First Frame Budget:')
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Time budget (ms) for image loading on first frame.\nHigher = more images loaded before window shows, but slower startup.\nDefault: 32') end
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, 80)
+    local iff_chg, iff_new = ImGui.InputText(ctx, '##img_first_frame_ms', tostring(S.img_first_frame_ms))
+    if ImGui.IsItemDeactivatedAfterEdit(ctx) then
+      local v = tonumber(iff_new)
+      if v then S.img_first_frame_ms = math.max(4, math.min(500, math.floor(v))) end
+      changed = true
+    end
+    ImGui.SameLine(ctx)
+    ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
+    ImGui.Text(ctx, 'ms')
+    ImGui.PopStyleColor(ctx, 1)
+
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Per Frame Budget:')
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Time budget (ms) for image loading on each subsequent frame.\nHigher = faster image pop-in, but may cause micro-stutters.\nDefault: 16') end
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, 80)
+    local ipf_chg, ipf_new = ImGui.InputText(ctx, '##img_per_frame_ms', tostring(S.img_per_frame_ms))
+    if ImGui.IsItemDeactivatedAfterEdit(ctx) then
+      local v = tonumber(ipf_new)
+      if v then S.img_per_frame_ms = math.max(4, math.min(200, math.floor(v))) end
+      changed = true
+    end
+    ImGui.SameLine(ctx)
+    ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
+    ImGui.Text(ctx, 'ms')
+    ImGui.PopStyleColor(ctx, 1)
+
+    ImGui.Spacing(ctx)
+
     -- Debug logging
     ImGui.AlignTextToFramePadding(ctx)
     ImGui.Text(ctx, 'Debug Logging:')
@@ -7776,7 +8012,7 @@ local function DrawSettingsTab()
       DrawDist('Tuning', tuning_dist, nil)
 
       -- Status distribution
-      DrawDist('Status', status_dist, STATUS_COLORS)
+      DrawDist('Status', status_dist, CFG.STATUS_COLORS)
 
       -- Genre distribution (top 15)
       local genre_sorted = {}
@@ -7808,7 +8044,7 @@ local function DrawSettingsTab()
     ImGui.Separator(ctx)
     ImGui.Spacing(ctx)
 
-    ImGui.Text(ctx, 'ReaDashboard v' .. SCRIPT_VERSION)
+    ImGui.Text(ctx, 'ReaDashboard v' .. CFG.SCRIPT_VERSION)
     ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
     ImGui.Text(ctx, 'Recent Projects: ' .. #S.recent_projects)
     if S.all_projects_loaded then
@@ -7973,15 +8209,15 @@ local function DrawFrame()
     Log('  BuildImageQueue: ' .. string.format('%.1fms', (reaper.time_precise() - t0) * 1000))
 
     t0 = reaper.time_precise()
-    ProcessImageQueue(8)  -- first frame: slightly larger budget (8ms) for initial images
-    Log('  Pre-load images (8ms budget): ' .. string.format('%.1fms', (reaper.time_precise() - t0) * 1000))
+    ProcessImageQueue(S.img_first_frame_ms)  -- first frame: configurable budget
+    Log('  Pre-load images (' .. S.img_first_frame_ms .. 'ms budget): ' .. string.format('%.1fms', (reaper.time_precise() - t0) * 1000))
 
     Log('--- FIRST FRAME DONE: ' .. #image_load_queue .. ' images queued for background loading ---')
   end
 
   -- Progressive image loading: process remaining images across frames (time-budgeted)
   if #image_load_queue > 0 then
-    local loaded = ProcessImageQueue(8)  -- 8ms budget per frame
+    local loaded = ProcessImageQueue(S.img_per_frame_ms)  -- configurable budget per frame
     if loaded > 0 and #image_load_queue == 0 then
       Log('All images loaded.')
     end
@@ -8476,14 +8712,14 @@ end
 local function Init()
   -- GC tuning: use incremental mode with smaller step multiplier to avoid large GC spikes
   -- Default Lua GC can cause 100ms+ pauses; incremental reduces per-frame cost
-  collectgarbage('incremental', 200, 100, 13)
+  pcall(collectgarbage, 'incremental', 200, 100, 13)
 
-  Log('=== ReaDashboard v' .. SCRIPT_VERSION .. ' starting ===')
+  Log('=== ReaDashboard v' .. CFG.SCRIPT_VERSION .. ' starting ===')
   Log('JS_ReaScriptAPI: ' .. (HAS_JS_API and 'YES' or 'NO'))
   Log('JSON library: ' .. (json and 'YES' or 'NO'))
 
   local t0 = reaper.time_precise()
-  ctx = ImGui.CreateContext(SCRIPT_NAME)
+  ctx = ImGui.CreateContext(CFG.SCRIPT_NAME)
   Log('CreateContext: ' .. string.format('%.1fms', (reaper.time_precise() - t0) * 1000))
 
   t0 = reaper.time_precise()
@@ -8562,7 +8798,7 @@ local function Loop()
     Log('Loop() entered (first call). Defer delay: ' .. string.format('%.1fms', (frame_start - SCRIPT_START_TIME) * 1000 - 3.4))
   end
 
-  ImGui.SetNextWindowSize(ctx, DEFAULT_W, DEFAULT_H, ImGui.Cond_FirstUseEver)
+  ImGui.SetNextWindowSize(ctx, CFG.DEFAULT_W, CFG.DEFAULT_H, ImGui.Cond_FirstUseEver)
 
   -- Fade-in animation: ramp anim_alpha from 0→1 over fade_in_duration seconds
   if S.fade_in_duration > 0 and S.anim_alpha < 1.0 then
@@ -8595,7 +8831,7 @@ local function Loop()
   if S.frame_count == 1 then t0 = reaper.time_precise() end
   local visible, open = ImGui.Begin(
     ctx,
-    SCRIPT_NAME .. ' v' .. SCRIPT_VERSION .. '###readashboard_main',
+    CFG.SCRIPT_NAME .. ' v' .. CFG.SCRIPT_VERSION .. '###readashboard_main',
     true,
     wflags
   )
