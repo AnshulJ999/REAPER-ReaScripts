@@ -1,5 +1,5 @@
 -- @description ReaDashboard
--- @version 1.0.3
+-- @version 1.0.4
 -- @author Anshul
 -- @credits solger (for ReaLauncher concept)
 -- @about
@@ -10,6 +10,12 @@
 --   - ReaImGui
 --   - SWS Extensions
 -- @changelog
+--
+--   v1.0.4
+--     + Persistent mode — keep script running in background for instant re-open (toggle in Settings)
+--     + Close on unfocus — automatically close/hide when clicking outside the window (toggle in Settings)
+--     + Close on Escape — make Escape key close/hide behavior configurable (on by default)
+--     + Toolbar toggle highlighting — toolbar button now reflects script open/closed state
 --
 --   v1.0.3
 --     + Last Opened sort mode — native REAPER recent order (last opened project first)
@@ -65,6 +71,39 @@ if not CheckDependency('SWS Extensions',
 local HAS_JS_API = reaper.JS_File_Stat ~= nil
 
 -- ============================================================================
+-- SINGLE-INSTANCE GUARD (before ImGui require — avoids ~1-5ms bootstrap cost on re-trigger)
+-- Prevents duplicate windows. If an instance is already running, optionally
+-- signal it to toggle visibility (close_on_new_instance) and exit immediately.
+-- Always active — there is no use case for multiple ReaDashboard windows.
+-- ============================================================================
+local RD_EXT = 'ReaDashboard'  -- ExtState section for instance management
+do
+  local running = reaper.GetExtState(RD_EXT, 'instance_running') == '1'
+  if running then
+    -- Verify the instance is actually alive via heartbeat (guards against crash-orphaned flag)
+    local hb = tonumber(reaper.GetExtState(RD_EXT, 'instance_heartbeat')) or 0
+    if reaper.time_precise() - hb < 10 then
+      -- Instance is alive — send toggle request if setting allows, then exit
+      local coni = reaper.GetExtState(RD_EXT, 'close_on_new_instance')
+      if coni ~= '0' then  -- default ON (empty or '1' = ON)
+        reaper.SetExtState(RD_EXT, 'toggle_request', '1', false)
+      end
+      return
+    end
+    -- Heartbeat stale (>10s) — previous instance is dead, clear all flags and cold start
+    reaper.DeleteExtState(RD_EXT, 'instance_running', false)
+    reaper.DeleteExtState(RD_EXT, 'instance_heartbeat', false)
+    reaper.DeleteExtState(RD_EXT, 'toggle_request', false)
+  end
+end
+
+-- Register instance IMMEDIATELY after guard succeeds (before anything else)
+-- This closes the TOCTOU window where a second launch could bypass the guard
+reaper.SetExtState(RD_EXT, 'instance_running', '1', false)
+reaper.SetExtState(RD_EXT, 'instance_heartbeat', tostring(reaper.time_precise()), false)
+reaper.SetExtState(RD_EXT, 'close_on_new_instance', '1', false)  -- default ON; will be overridden by LoadState
+
+-- ============================================================================
 -- IMGUI MODULE
 -- ============================================================================
 
@@ -78,7 +117,7 @@ local ImGui = require 'imgui' '0.10'
 local CFG = {
   -- Script identity
   SCRIPT_NAME    = 'ReaDashboard',
-  SCRIPT_VERSION = '1.0.3',
+  SCRIPT_VERSION = '1.0.4',
   EXT_SECTION    = 'ReaDashboard',
 
   -- Window defaults
@@ -487,6 +526,16 @@ local S = {
   auto_focus_search = false,  -- auto-focus search bar on script open
   recent_count_in_filtered = 0,
   keep_open   = true,
+  persistent_mode       = false,  -- keep script alive in background when window closed
+  close_on_new_instance = true,   -- re-triggering action closes/hides the running instance
+  close_on_unfocus      = false,  -- close/hide when window loses focus
+  close_on_escape       = true,   -- Escape key can close/hide window (default ON: backward compat)
+  is_hidden             = false,  -- runtime: true when persistent mode hid the window
+  had_focus             = false,  -- runtime: guard for close_on_unfocus (only trigger after first focus)
+  hidden_since          = 0,      -- runtime: reaper.time_precise() timestamp when window was hidden
+  force_exit            = false,  -- runtime: bypass persistent hide, force full termination
+  _refocus_next_frame   = false,  -- runtime: deferred SetNextWindowFocus after persistent re-show
+  _save_pending         = false,  -- runtime: deferred SaveState on next hidden frame
   grid_cols   = 5,
   tab_restored = false,
 
@@ -3771,6 +3820,10 @@ local function SaveState()
   Set('default_all_sort',    S.default_all_sort)
   Set('artist_sort_by_album', S.artist_sort_by_album and '1' or '0')
   Set('keep_open',         S.keep_open and '1' or '0')
+  Set('persistent_mode',       S.persistent_mode and '1' or '0')
+  Set('close_on_new_instance', S.close_on_new_instance and '1' or '0')
+  Set('close_on_unfocus',      S.close_on_unfocus and '1' or '0')
+  Set('close_on_escape',       S.close_on_escape and '1' or '0')
   Set('recent_view_mode',  S.recent_view_mode)
   Set('all_view_mode',     S.all_view_mode)
   Set('active_tab',        S.active_tab)
@@ -3897,6 +3950,14 @@ local function LoadState()
 
   local ko = G('keep_open')
   if ko ~= '' then S.keep_open = (ko == '1') end
+  local pm = G('persistent_mode')
+  if pm ~= '' then S.persistent_mode = (pm == '1') end
+  local coni = G('close_on_new_instance')
+  if coni ~= '' then S.close_on_new_instance = (coni == '1') end
+  local cou = G('close_on_unfocus')
+  if cou ~= '' then S.close_on_unfocus = (cou == '1') end
+  local coe = G('close_on_escape')
+  if coe ~= '' then S.close_on_escape = (coe == '1') end
 
   -- Per-tab view modes (migrate from old single S.view_mode if present)
   local rvm = G('recent_view_mode')
@@ -6843,13 +6904,22 @@ local function HandleKeys()
     end
   end
 
-  -- Escape: clear selection first, close window if already clear
-  if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+  -- Shift+Escape or Ctrl+Q: force exit (bypasses persistent mode)
+  local shift_held = ImGui.IsKeyDown(ctx, ImGui.Key_LeftShift) or ImGui.IsKeyDown(ctx, ImGui.Key_RightShift)
+  local ctrl_held = ImGui.IsKeyDown(ctx, ImGui.Key_LeftCtrl) or ImGui.IsKeyDown(ctx, ImGui.Key_RightCtrl)
+  if (shift_held and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape))
+  or (ctrl_held and ImGui.IsKeyPressed(ctx, ImGui.Key_Q)) then
+    S.force_exit = true
+    S.window_open = false
+  end
+
+  -- Escape: clear selection first, then close/hide window if setting allows
+  if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) and not shift_held then
     if SelectionCount() > 1 then
       -- Reduce to single selection on primary idx
       S.selected = {}
       if S.selected_idx > 0 then S.selected[S.selected_idx] = true end
-    else
+    elseif S.close_on_escape then
       S.window_open = false
     end
   end
@@ -7488,6 +7558,43 @@ local function DrawSettingsTab()
     ImGui.SameLine(ctx, lbl_w)
     local kop_changed, kop_new = ImGui.Checkbox(ctx, 'Keep window open after launching project##kop', S.keep_open)
     if kop_changed then S.keep_open = kop_new; changed = true end
+
+    -- Persistent mode
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Persistent Mode:')
+    ImGui.SameLine(ctx, lbl_w)
+    local pm_chg, pm_new = ImGui.Checkbox(ctx, 'Keep running in background for instant re-open##pm', S.persistent_mode)
+    if pm_chg then S.persistent_mode = pm_new; changed = true end
+
+    -- Close on new instance
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Close on New Instance:')
+    ImGui.SameLine(ctx, lbl_w)
+    local coni_chg, coni_new = ImGui.Checkbox(ctx, 'Re-triggering action closes/hides the window##coni', S.close_on_new_instance)
+    if coni_chg then
+      S.close_on_new_instance = coni_new
+      -- Update session ExtState so the guard can read it immediately
+      reaper.SetExtState(RD_EXT, 'close_on_new_instance', coni_new and '1' or '0', false)
+      changed = true
+    end
+
+    -- Close on unfocus
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Close on Unfocus:')
+    ImGui.SameLine(ctx, lbl_w)
+    local cou_chg, cou_new = ImGui.Checkbox(ctx, 'Close/hide when clicking outside the window##cou', S.close_on_unfocus)
+    if cou_chg then
+      S.close_on_unfocus = cou_new
+      if not cou_new then S.had_focus = false end  -- reset guard when disabling
+      changed = true
+    end
+
+    -- Close on Escape
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Close on Escape:')
+    ImGui.SameLine(ctx, lbl_w)
+    local coe_chg, coe_new = ImGui.Checkbox(ctx, 'Escape key closes/hides the window##coe', S.close_on_escape)
+    if coe_chg then S.close_on_escape = coe_new; changed = true end
 
     -- Auto-focus search bar
     ImGui.AlignTextToFramePadding(ctx)
@@ -8180,6 +8287,25 @@ local function DrawActionsTab()
 
     if changed and not ImGui.IsAnyItemActive(ctx) then SaveState() end
 
+    ImGui.Spacing(ctx)
+    ImGui.Spacing(ctx)
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+
+    -- Exit Script button (always available — force-quits regardless of persistent mode)
+    ImGui.PushStyleColor(ctx, ImGui.Col_Button, 0x8B2020FF)
+    ImGui.PushStyleColor(ctx, ImGui.Col_ButtonHovered, 0xA52828FF)
+    ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive, 0xC03030FF)
+    if ImGui.Button(ctx, 'Exit Script', 120, 0) then
+      S.force_exit = true
+      S.window_open = false
+    end
+    ImGui.PopStyleColor(ctx, 3)
+    ImGui.SameLine(ctx)
+    ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
+    ImGui.Text(ctx, 'Fully close the script (Shift+Esc or Ctrl+Q)')
+    ImGui.PopStyleColor(ctx, 1)
+
     ImGui.EndChild(ctx)
   end
 end
@@ -8714,6 +8840,13 @@ local function Init()
   -- Default Lua GC can cause 100ms+ pauses; incremental reduces per-frame cost
   pcall(collectgarbage, 'incremental', 200, 100, 13)
 
+  -- Toolbar toggle highlight: button shows active while script is open
+  local _, _, sec, cmd = reaper.get_action_context()
+  S.toolbar_sec = sec
+  S.toolbar_cmd = cmd
+  reaper.SetToggleCommandState(sec, cmd, 1)
+  reaper.RefreshToolbar2(sec, cmd)
+
   Log('=== ReaDashboard v' .. CFG.SCRIPT_VERSION .. ' starting ===')
   Log('JS_ReaScriptAPI: ' .. (HAS_JS_API and 'YES' or 'NO'))
   Log('JSON library: ' .. (json and 'YES' or 'NO'))
@@ -8781,6 +8914,11 @@ local function Init()
   LoadWhitelist()
   Log('LoadWhitelist: ' .. string.format('%.1fms', (reaper.time_precise() - t0) * 1000))
 
+  -- Update close_on_new_instance in ExtState from S table (previously set to default at guard)
+  reaper.SetExtState(RD_EXT, 'close_on_new_instance', S.close_on_new_instance and '1' or '0', false)
+  S._last_heartbeat = reaper.time_precise()
+  Log('Instance registered (persistent=' .. tostring(S.persistent_mode) .. ')')
+
   Log('Init complete.')
 end
 
@@ -8790,9 +8928,92 @@ end
 
 -- frame_count is in S table
 
+-- Static defer closure: avoids creating a new anonymous function every frame (~30fps)
+-- Forward-declared here, assigned after OnError is defined
+local DeferredLoop
+
 local function Loop()
   local frame_start = reaper.time_precise()
   S.frame_count = S.frame_count + 1
+
+  -- Heartbeat: throttled to once per 3 seconds (negligible overhead)
+  local now_tp = reaper.time_precise()
+  if now_tp - (S._last_heartbeat or 0) >= 3 then
+    reaper.SetExtState(RD_EXT, 'instance_heartbeat', tostring(now_tp), false)
+    S._last_heartbeat = now_tp
+  end
+
+  -- Toggle request: handle show/hide/close from second instance re-trigger
+  if reaper.GetExtState(RD_EXT, 'toggle_request') == '1' then
+    reaper.DeleteExtState(RD_EXT, 'toggle_request', false)
+    if S.is_hidden then
+      -- SHOW: unhide the window
+      S.is_hidden = false
+      S.window_open = true
+      S.had_focus = false
+      S._refocus_next_frame = true  -- defer SetNextWindowFocus to after Begin/End
+      -- Toolbar: re-light button on show
+      if S.toolbar_sec and S.toolbar_cmd then
+        reaper.SetToggleCommandState(S.toolbar_sec, S.toolbar_cmd, 1)
+        reaper.RefreshToolbar2(S.toolbar_sec, S.toolbar_cmd)
+      end
+      if S.fade_in_duration > 0 then S.anim_alpha = 0.0 end
+      local hidden_dur = now_tp - S.hidden_since
+      if hidden_dur > 30 then
+        S.needs_load = true
+        Log('Toggle: show (data refresh, hidden ' .. string.format('%.0f', hidden_dur) .. 's)')
+      else
+        Log('Toggle: show (instant, hidden ' .. string.format('%.1f', hidden_dur) .. 's)')
+      end
+    elseif S.persistent_mode then
+      -- HIDE: enter background immediately (no extra rendered frame)
+      S.is_hidden = true
+      S.hidden_since = now_tp
+      S.window_open = false
+      S.had_focus = false
+      -- Toolbar: dim button while hidden (re-lit on SHOW)
+      if S.toolbar_sec and S.toolbar_cmd then
+        reaper.SetToggleCommandState(S.toolbar_sec, S.toolbar_cmd, 0)
+        reaper.RefreshToolbar2(S.toolbar_sec, S.toolbar_cmd)
+      end
+      S._save_pending = true  -- defer SaveState to next hidden frame (instant hide)
+      Log('Toggle: hide (persistent)')
+    else
+      -- CLOSE: terminate script
+      S.window_open = false
+      Log('Toggle: close (non-persistent)')
+    end
+  end
+
+  -- Hidden mode: script is alive but window is not shown
+  -- IMPORTANT: Must call Begin/End to keep ImGui context valid.
+  -- ReaImGui docs: "The context will remain valid as long as it is used in each defer cycle."
+  -- GetFrameCount alone does NOT count as "used" — a proper Begin/End frame is required.
+  if S.is_hidden then
+    -- Safety net: validate context is still alive (NVK uses this pattern)
+    if not ImGui.ValidatePtr(ctx, 'ImGui_Context*') then
+      Log('CRITICAL: ImGui context invalidated during hidden mode, exiting')
+      return  -- context dead, let script terminate via atexit
+    end
+    -- Deferred SaveState from hide transition (runs on first hidden frame, not the hide frame)
+    if S._save_pending then
+      S._save_pending = false
+      SaveState()
+    end
+    ImGui.PushFont(ctx, font, S.font_size)
+    ImGui.SetNextWindowPos(ctx, -32000, -32000, ImGui.Cond_Always)
+    ImGui.SetNextWindowSize(ctx, 1, 1, ImGui.Cond_Always)
+    ImGui.Begin(ctx, '###readashboard_keepalive', true,
+        ImGui.WindowFlags_NoDecoration
+      | ImGui.WindowFlags_NoInputs
+      | ImGui.WindowFlags_NoFocusOnAppearing
+      | ImGui.WindowFlags_NoNav
+      | ImGui.WindowFlags_NoSavedSettings)
+    ImGui.End(ctx)
+    ImGui.PopFont(ctx)
+    reaper.defer(DeferredLoop)
+    return
+  end
 
   if S.frame_count == 1 then
     Log('Loop() entered (first call). Defer delay: ' .. string.format('%.1fms', (frame_start - SCRIPT_START_TIME) * 1000 - 3.4))
@@ -8828,6 +9049,12 @@ local function Loop()
                | ImGui.WindowFlags_NoScrollbar
                | ImGui.WindowFlags_NoScrollWithMouse
 
+  -- Re-focus window after persistent mode re-show (deferred from toggle handler)
+  if S._refocus_next_frame then
+    ImGui.SetNextWindowFocus(ctx)
+    S._refocus_next_frame = false
+  end
+
   if S.frame_count == 1 then t0 = reaper.time_precise() end
   local visible, open = ImGui.Begin(
     ctx,
@@ -8838,6 +9065,16 @@ local function Loop()
   if S.frame_count == 1 then Log('  ImGui.Begin: ' .. string.format('%.1fms', (reaper.time_precise() - t0) * 1000)) end
 
   if visible then
+    -- Close-on-unfocus: detect focus loss and schedule close/hide
+    if S.close_on_unfocus then
+      local focused = ImGui.IsWindowFocused(ctx, ImGui.FocusedFlags_AnyWindow)
+      if focused then
+        S.had_focus = true
+      elseif S.had_focus then
+        S.window_open = false
+      end
+    end
+
     DrawFrame()
   end
   -- End() must always be called after Begin(), even when window is collapsed/clipped
@@ -8853,7 +9090,20 @@ local function Loop()
   end
 
   if open and S.window_open then
-    reaper.defer(function() xpcall(Loop, OnError) end)
+    reaper.defer(DeferredLoop)
+  elseif S.persistent_mode and not S.force_exit then
+    -- Window closed but persistent mode: hide instead of dying
+    S.is_hidden = true
+    S.hidden_since = reaper.time_precise()
+    S.had_focus = false
+    -- Toolbar: dim button while hidden
+    if S.toolbar_sec and S.toolbar_cmd then
+      reaper.SetToggleCommandState(S.toolbar_sec, S.toolbar_cmd, 0)
+      reaper.RefreshToolbar2(S.toolbar_sec, S.toolbar_cmd)
+    end
+    S._save_pending = true  -- defer SaveState to next hidden frame (instant hide)
+    Log('Persistent mode: window hidden (frame ' .. S.frame_count .. ')')
+    reaper.defer(DeferredLoop)
   else
     Log('Window closing (frame ' .. S.frame_count .. '). open=' .. tostring(open) .. ' window_open=' .. tostring(S.window_open))
     SaveState()
@@ -8875,12 +9125,30 @@ function OnError(err)
   end
 end
 
+-- Assign the static defer closure (forward-declared before Loop)
+DeferredLoop = function() xpcall(Loop, OnError) end
+
 reaper.atexit(function()
-  Log('atexit called (frame ' .. S.frame_count .. ')')
-  SaveState()
-  SaveHidden()
-  SaveWhitelist()
-  Log('atexit SaveState done. Total script lifetime: ' .. string.format('%.0fms', (reaper.time_precise() - SCRIPT_START_TIME) * 1000))
+  -- Wrapped in pcall: during "terminate on new instance", REAPER may kill the script
+  -- mid-frame, leaving state inconsistent. pcall prevents cascade crashes in atexit.
+  pcall(function()
+    Log('atexit called (frame ' .. S.frame_count .. ')')
+    SaveState()
+    SaveHidden()
+    SaveWhitelist()
+  end)
+  -- Always clear instance flags (even if SaveState failed)
+  pcall(reaper.DeleteExtState, RD_EXT, 'instance_running', false)
+  pcall(reaper.DeleteExtState, RD_EXT, 'instance_heartbeat', false)
+  pcall(reaper.DeleteExtState, RD_EXT, 'toggle_request', false)
+  -- Toolbar toggle: mark as inactive
+  pcall(function()
+    if S.toolbar_sec and S.toolbar_cmd then
+      reaper.SetToggleCommandState(S.toolbar_sec, S.toolbar_cmd, 0)
+      reaper.RefreshToolbar2(S.toolbar_sec, S.toolbar_cmd)
+    end
+  end)
+  pcall(Log, 'atexit done. Total script lifetime: ' .. string.format('%.0fms', (reaper.time_precise() - SCRIPT_START_TIME) * 1000))
 end)
 
 -- GO
