@@ -1,5 +1,5 @@
 -- @description ReaDashboard
--- @version 1.0.5
+-- @version 1.0.6
 -- @author Anshul
 -- @credits solger (for ReaLauncher concept)
 -- @about
@@ -10,6 +10,9 @@
 --   - ReaImGui
 --   - SWS Extensions
 -- @changelog
+--
+--   v1.0.6
+--     + Fixed a critical bug preventing Mac and Linux users from opening any projects due to Windows-specific path formatting.
 --
 --   v1.0.5
 --     + Fixed 'Last Opened' sorting order (now properly ordered newest to oldest)
@@ -1301,12 +1304,18 @@ local function CanonicalPath(p)
   return np
 end
 
---- Convert an internal (forward-slash) path to Windows backslash format for
---- handing off to REAPER APIs that write to REAPER.ini.
---- Only needed at the exact boundary where a path leaves the script and enters REAPER.
+local IS_WIN = reaper.GetOS():match('Win') ~= nil
+local IS_MAC = reaper.GetOS():match('OSX') ~= nil or reaper.GetOS():match('macOS') ~= nil
+
+--- Convert an internal path to the native OS path format for
+--- handing off to REAPER APIs (Main_openProject and REAPER.ini writes).
 local function ReaperPath(p)
   if not p then return p end
-  return CanonicalPath(p):gsub('/', '\\')
+  if IS_WIN then
+    return CanonicalPath(p):gsub('/', '\\')
+  else
+    return CanonicalPath(p):gsub('\\', '/')
+  end
 end
 
 -- ============================================================================
@@ -3387,14 +3396,10 @@ end
 
 local function ActionLocateInExplorer(proj)
   if not proj or not proj.exists then return end
-  local os_name = reaper.GetOS()
-  if os_name:match('OSX') or os_name:match('macOS') then
-    -- macOS: CF_LocateInExplorer works natively with forward-slash paths
-    reaper.CF_LocateInExplorer(proj.path)
+  if IS_WIN then
+    reaper.CF_LocateInExplorer(proj.path:gsub('/', '\\'))
   else
-    -- Windows/Linux: CF_LocateInExplorer needs backslash paths on Windows
-    local winpath = proj.path:gsub('/', '\\')
-    reaper.CF_LocateInExplorer(winpath)
+    reaper.CF_LocateInExplorer(proj.path:gsub('\\', '/'))
   end
 end
 
@@ -4978,7 +4983,7 @@ local function DrawContextMenu(proj, idx)
         if ImGui.Selectable(ctx, 'Open Project', false) then ActionOpenProject(proj) end
         if ImGui.Selectable(ctx, 'Load in Tab',  false) then ActionLoadInTab(proj) end
         ImGui.Separator(ctx)
-        local locate_label = (reaper.GetOS():match('OSX') or reaper.GetOS():match('macOS')) and 'Reveal in Finder' or 'Locate in Explorer'
+        local locate_label = IS_MAC and 'Reveal in Finder' or 'Locate in Explorer'
         if ImGui.Selectable(ctx, locate_label, false) then ActionLocateInExplorer(proj) end
       end
 
