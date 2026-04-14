@@ -1,5 +1,5 @@
 -- @description ReaDashboard
--- @version 1.0.4
+-- @version 1.0.5
 -- @author Anshul
 -- @credits solger (for ReaLauncher concept)
 -- @about
@@ -10,6 +10,12 @@
 --   - ReaImGui
 --   - SWS Extensions
 -- @changelog
+--
+--   v1.0.5
+--     + Fixed 'Last Opened' sorting order (now properly ordered newest to oldest)
+--     + Fixed search bar repeatedly losing keyboard focus while typing
+--     + Fixed massive lag and UI sluggishness when bringing the script back from background persistent mode
+--     + Improved visual widths for text input fields in the Settings panel
 --
 --   v1.0.4
 --     + Persistent mode — keep script running in background for instant re-open (toggle in Settings)
@@ -2841,7 +2847,7 @@ local function SortList(list, mode)
   elseif mode == CFG.SORT_RECENT then
     -- REAPER.ini order = last-opened order (recent01 = most recently opened)
     table.sort(out, function(a, b)
-      return (a.recent_index or 9999) < (b.recent_index or 9999)
+      return (a.recent_index or 0) > (b.recent_index or 0)
     end)
   end
 
@@ -3240,7 +3246,6 @@ local function RefreshFiltered()
   if S.selected_idx < 1 and #S.filtered_projects > 0 then S.selected_idx = 1 end
   if S.selected_idx > 0 then 
     S.selected[S.selected_idx] = true 
-    S.pending_focus_idx = S.selected_idx
   end
 end
 
@@ -7030,7 +7035,7 @@ local function DrawSettingsTab()
       ImGui.SetTooltip(ctx, 'Root folder containing your REAPER projects (.rpp files).\nThe All Projects tab scans this folder recursively.\nLeave blank to use only the Recent tab.')
     end
     ImGui.SameLine(ctx, lbl_w)
-    ImGui.SetNextItemWidth(ctx, -1)
+    ImGui.SetNextItemWidth(ctx, -150)
     local sp_changed, sp_new = ImGui.InputText(ctx, '##scan_path', S.ALL_PROJECTS_PATH)
     if sp_changed then S.ALL_PROJECTS_PATH = sp_new; changed = true end
 
@@ -7136,7 +7141,7 @@ local function DrawSettingsTab()
     ImGui.Text(ctx, 'Default Artwork:')
     if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Fallback image shown when a project has no album art.\nLeave empty to use placeholder initials/name instead.') end
     ImGui.SameLine(ctx, lbl_w)
-    ImGui.SetNextItemWidth(ctx, -60)
+    ImGui.SetNextItemWidth(ctx, -150)
     local da_chg, da_new = ImGui.InputText(ctx, '##default_artwork_path', S.default_artwork_path)
     if da_chg then S.default_artwork_path = da_new; changed = true end
     ImGui.SameLine(ctx)
@@ -7232,7 +7237,7 @@ local function DrawSettingsTab()
     ImGui.AlignTextToFramePadding(ctx)
     ImGui.Text(ctx, 'Primary Genres:')
     ImGui.SameLine(ctx, lbl_w)
-    ImGui.SetNextItemWidth(ctx, 350)
+    ImGui.SetNextItemWidth(ctx, -150)
     local cpg_chg, cpg_new = ImGui.InputText(ctx, '##custom_primary_genres', S.custom_primary_genres)
     if cpg_chg then S.custom_primary_genres = cpg_new end
     if ImGui.IsItemDeactivatedAfterEdit(ctx) then
@@ -7245,7 +7250,7 @@ local function DrawSettingsTab()
     ImGui.AlignTextToFramePadding(ctx)
     ImGui.Text(ctx, 'Custom Statuses:')
     ImGui.SameLine(ctx, lbl_w)
-    ImGui.SetNextItemWidth(ctx, 350)
+    ImGui.SetNextItemWidth(ctx, -150)
     local cst_chg, cst_new = ImGui.InputText(ctx, '##custom_statuses', S.custom_statuses)
     if cst_chg then S.custom_statuses = cst_new end
     if ImGui.IsItemDeactivatedAfterEdit(ctx) then
@@ -8959,9 +8964,24 @@ local function Loop()
       end
       if S.fade_in_duration > 0 then S.anim_alpha = 0.0 end
       local hidden_dur = now_tp - S.hidden_since
+      -- [2026-04-14] Performance Optimization:
+      -- Previously, hiding the script for >30s triggered `S.needs_load = true` on re-show.
+      -- This caused a massive GC leak (accumulating discarded S.all_projects tables) inside 
+      -- long 1+ hr sessions, causing sluggishness. It also blocked the thread (slow re-show).
+      -- Now, we ONLY refresh Recent Projects (fast INI read, <1ms) to keep "Last Opened" up to date.
+      -- To do a full recursive OS re-scan, the user must explicitly hit Refresh (Shift+F5).
+      --[[
       if hidden_dur > 30 then
         S.needs_load = true
         Log('Toggle: show (data refresh, hidden ' .. string.format('%.0f', hidden_dur) .. 's)')
+      else
+        Log('Toggle: show (instant, hidden ' .. string.format('%.1f', hidden_dur) .. 's)')
+      end
+      ]]
+      if hidden_dur > 10 then
+        S.recent_projects = ScanRecentProjects()
+        RefreshFiltered()
+        Log('Toggle: show (fast recent refresh, hidden ' .. string.format('%.0f', hidden_dur) .. 's)')
       else
         Log('Toggle: show (instant, hidden ' .. string.format('%.1f', hidden_dur) .. 's)')
       end
