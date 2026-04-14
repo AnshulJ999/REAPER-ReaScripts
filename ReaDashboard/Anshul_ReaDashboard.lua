@@ -1,5 +1,5 @@
 -- @description ReaDashboard
--- @version 1.0.6
+-- @version 1.0.7
 -- @author Anshul
 -- @credits solger (for ReaLauncher concept)
 -- @about
@@ -10,6 +10,9 @@
 --   - ReaImGui
 --   - SWS Extensions
 -- @changelog
+--
+--   v1.0.7
+--     + Bug fixes
 --
 --   v1.0.6
 --     + Fixed a critical bug preventing Mac and Linux users from opening any projects due to Windows-specific path formatting.
