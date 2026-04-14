@@ -8984,7 +8984,7 @@ local function Loop()
       end
       ]]
       if hidden_dur > 10 then
-        S.recent_projects = ScanRecentProjects()
+        S.recent_projects = LoadRecentProjects()
         RefreshFiltered()
         Log('Toggle: show (fast recent refresh, hidden ' .. string.format('%.0f', hidden_dur) .. 's)')
       else
