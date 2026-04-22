@@ -1,5 +1,5 @@
 -- @description ReaDashboard
--- @version 1.0.7
+-- @version 1.0.8
 -- @author Anshul
 -- @credits solger (for ReaLauncher concept)
 -- @about
@@ -11,7 +11,7 @@
 --   - SWS Extensions
 -- @changelog
 --
---   v1.0.7
+--   v1.0.7 and v1.0.8
 --     + Bug fixes
 --
 --   v1.0.6
@@ -129,7 +129,7 @@ local ImGui = require 'imgui' '0.10'
 local CFG = {
   -- Script identity
   SCRIPT_NAME    = 'ReaDashboard',
-  SCRIPT_VERSION = '1.0.4',
+  SCRIPT_VERSION = '1.0.8',
   EXT_SECTION    = 'ReaDashboard',
 
   -- Window defaults
@@ -2598,7 +2598,7 @@ local function LoadRecentProjects()
     local _, fullPath = reaper.BR_Win32_GetPrivateProfileString(
       'recent', 'recent' .. string.format('%02d', i), 'noEntry', ini
     )
-    if fullPath and fullPath ~= '' and fullPath ~= 'noEntry' then
+    if fullPath and fullPath ~= '' and fullPath ~= ' ' and fullPath ~= 'noEntry' then
       local filename = GetFilename(fullPath)
 
       -- Skip duplicates (REAPER may store both symlink and real path)
@@ -3400,9 +3400,9 @@ end
 local function ActionLocateInExplorer(proj)
   if not proj or not proj.exists then return end
   if IS_WIN then
-    reaper.CF_LocateInExplorer(proj.path:gsub('/', '\\'))
+    reaper.CF_LocateInExplorer((proj.path:gsub('/', '\\')))
   else
-    reaper.CF_LocateInExplorer(proj.path:gsub('\\', '/'))
+    reaper.CF_LocateInExplorer((proj.path:gsub('\\', '/')))
   end
 end
 
@@ -8987,8 +8987,7 @@ local function Loop()
       end
       ]]
       if hidden_dur > 10 then
-        S.recent_projects = LoadRecentProjects()
-        RefreshFiltered()
+        ActionRefresh()
         Log('Toggle: show (fast recent refresh, hidden ' .. string.format('%.0f', hidden_dur) .. 's)')
       else
         Log('Toggle: show (instant, hidden ' .. string.format('%.1f', hidden_dur) .. 's)')
