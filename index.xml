@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" commit="8300533f644ebf930165db457dc97c3a49dc67d4" name="Anshul-ReaScripts">
+<index version="1" commit="c631b5ade00ebaf6da3ce860574cbf6d41668128" name="Anshul-ReaScripts">
   <category name="ReaDashboard">
     <reapack name="Anshul_ReaDashboard.lua" type="script" desc="ReaDashboard">
       <metadata>
@@ -319,6 +319,65 @@ v1.0.0 (2026-04-06)
 
   + Initial release]]></changelog>
         <source main="main">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/8300533f644ebf930165db457dc97c3a49dc67d4/ReaDashboard/Anshul_ReaDashboard.lua</source>
+      </version>
+      <version name="1.1.0" author="Anshul" time="2026-04-22T17:52:42Z">
+        <changelog><![CDATA[
+v1.1.0
+  + Guitar Mode toggle — hide all guitar-specific fields (strings, tuning, transpose, guitar, amp) via Settings; data untouched
+  + Scan staleness indicator — status bar shows when the last hard refresh was run (right-aligned, faint); Refresh button tooltip updated
+  + Ctrl+C copies selected project path(s) to clipboard (multi-select copies newline-separated)
+  + Added Keyboard Shortcuts section to Actions tab documenting all built-in hotkeys
+  * Fixed README keyboard shortcuts table (corrected Ctrl+C, added missing Home/End/Ctrl+A/etc.)
+
+v1.0.9
+  + Statuses are now fully editable in Settings (add, remove, rename — same as Genres)
+  + 'Browse...' button to open any .rpp file from disk via native OS file dialog
+  * Fixed: 'All Projects' separator no longer appears redundantly on the All Projects tab
+  * Fixed: Locate in Explorer / Reveal in Finder crash ('expected 1 arguments maximum')
+
+v1.0.7 and v1.0.8
+  + Bug fixes
+
+v1.0.6
+  + Fixed a critical bug preventing Mac and Linux users from opening any projects due to Windows-specific path formatting.
+
+v1.0.5
+  + Fixed 'Last Opened' sorting order (now properly ordered newest to oldest)
+  + Fixed search bar repeatedly losing keyboard focus while typing
+  + Fixed massive lag and UI sluggishness when bringing the script back from background persistent mode
+  + Improved visual widths for text input fields in the Settings panel
+
+v1.0.4
+  + Persistent mode — keep script running in background for instant re-open (toggle in Settings)
+  + Close on unfocus — automatically close/hide when clicking outside the window (toggle in Settings)
+  + Close on Escape — make Escape key close/hide behavior configurable (on by default)
+  + Toolbar toggle highlighting — toolbar button now reflects script open/closed state
+
+v1.0.3
+  + Last Opened sort mode — native REAPER recent order (last opened project first)
+  + Multiple project folder paths — scan additional folders alongside the primary path
+  + Configurable image loading budgets — tune first-frame and per-frame budgets in Settings
+  + Default artwork path — fallback image when project has no art (configurable in Settings)
+  + Full project name on placeholder — show full name instead of initials when art is missing
+  + Custom statuses — add your own status presets via Settings (comma-separated)
+  + Expanded built-in statuses — added Recording, Mixing, On Hold, Released
+
+v1.0.2
+  + LUA Slot cleanup to free 48 slots by CFG refactor
+
+v1.0.1 (2026-04-09)
+
+  + Bulk Tag Editor — edit tags across multiple selected projects at once
+  + Configurable Primary Genres — customize genre list from Settings
+  + Grid Card Tooltip Mode — show metadata fields as hover tooltip instead of on-card
+  + Grid Card Fields — added Tuning and Transpose as optional card/tooltip fields
+  + Grid Tooltip Delay — configurable hover delay for grid card tooltips
+  + Configurable Grid Spacing — adjustable card spacing in Settings
+
+v1.0.0 (2026-04-06)
+
+  + Initial release]]></changelog>
+        <source main="main">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/c631b5ade00ebaf6da3ce860574cbf6d41668128/ReaDashboard/Anshul_ReaDashboard.lua</source>
       </version>
     </reapack>
   </category>
