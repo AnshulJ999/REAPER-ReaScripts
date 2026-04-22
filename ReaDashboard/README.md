@@ -76,6 +76,7 @@ The **Recent** tab works immediately with no configuration - it reads directly f
 | `Left / Right` | Navigate grid columns |
 | `Home / End` | Jump to first or last project |
 | `Ctrl+A` | Select all visible projects |
+| `Ctrl+C` | Copy selected project path(s) |
 | `Ctrl+Click` | Toggle project in/out of selection |
 | `Shift+Click` | Range select |
 | `Ctrl+Tab` | Cycle between Recent and All Projects |
