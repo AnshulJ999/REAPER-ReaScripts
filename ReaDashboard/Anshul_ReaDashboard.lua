@@ -1,5 +1,5 @@
 -- @description ReaDashboard
--- @version 1.0.9
+-- @version 1.1.0
 -- @author Anshul
 -- @credits solger (for ReaLauncher concept)
 -- @about
@@ -10,6 +10,13 @@
 --   - ReaImGui
 --   - SWS Extensions
 -- @changelog
+--
+--   v1.1.0
+--     + Guitar Mode toggle — hide all guitar-specific fields (strings, tuning, transpose, guitar, amp) via Settings; data untouched
+--     + Scan staleness indicator — status bar shows when the last hard refresh was run (right-aligned, faint); Refresh button tooltip updated
+--     + Ctrl+C copies selected project path(s) to clipboard (multi-select copies newline-separated)
+--     + Added Keyboard Shortcuts section to Actions tab documenting all built-in hotkeys
+--     * Fixed README keyboard shortcuts table (corrected Ctrl+C, added missing Home/End/Ctrl+A/etc.)
 --
 --   v1.0.9
 --     + Statuses are now fully editable in Settings (add, remove, rename — same as Genres)
@@ -135,7 +142,7 @@ local ImGui = require 'imgui' '0.10'
 local CFG = {
   -- Script identity
   SCRIPT_NAME    = 'ReaDashboard',
-  SCRIPT_VERSION = '1.0.9',
+  SCRIPT_VERSION = '1.1.0',
   EXT_SECTION    = 'ReaDashboard',
 
   -- Window defaults
@@ -675,6 +682,10 @@ local S = {
   grid_show_tuning     = false,
   grid_show_transpose  = false,
   grid_tooltip_delay   = 0.0,   -- seconds (0.0 = instant)
+
+  -- Guitar mode: when false, hides all guitar-specific fields (strings, tuning, transpose, guitar, amp)
+  -- Data in project-tags.json is untouched — toggling back on restores all values
+  guitar_mode = true,
 
   -- Configurable primary genres (comma-separated)
   custom_primary_genres = 'Djent,Prog,Metal,Rock,Pop,Blues,Indie,Jazz',
@@ -3813,6 +3824,7 @@ local function ActionHardRefresh()
   projects = (S.active_tab == 'all' and S.all_projects_loaded) and S.all_projects or S.recent_projects
 
   RefreshFiltered()
+  reaper.SetExtState(CFG.EXT_SECTION, 'last_hard_refresh', tostring(os.time()), true)
   BuildImageQueue()
   Log('Hard refresh complete.')
 end
@@ -3914,6 +3926,7 @@ local function SaveState()
   -- Search history
   Set('search_history_enabled', S.search_history_enabled and '1' or '0')
   Set('search_history', table.concat(S.search_history, '|'))
+  Set('guitar_mode',     S.guitar_mode and '1' or '0')
   -- NOTE: SaveHidden() and SaveWhitelist() are NOT called here.
   -- They write to disk (JSON files) and would cause I/O on every slider drag / UI change.
   -- Instead, they are called only at the exact points where hidden/whitelist data changes.
@@ -4223,6 +4236,9 @@ local function LoadState()
     end
   end
 
+  local gm = G('guitar_mode')
+  if gm ~= '' then S.guitar_mode = (gm == '1') end
+
   -- Session state restoration (persist=false: only exists within same REAPER session)
   -- These override defaults when re-opening the script within the same REAPER session
   local function GS(key) return reaper.GetExtState(CFG.EXT_SECTION, 's_' .. key) end
@@ -4407,6 +4423,16 @@ local function PushSearchHistory(query)
   S.search_buf_live = ''
 end
 
+--- Returns a short age string like '3d ago' / '2h ago' / '<1h ago', or nil if ts == 0.
+local function FormatScanAge(ts)
+  if not ts or ts == 0 then return nil end
+  local elapsed = os.time() - ts
+  if elapsed < 3600 then return '<1h ago'
+  elseif elapsed < 86400 then return math.floor(elapsed / 3600) .. 'h ago'
+  else return math.floor(elapsed / 86400) .. 'd ago'
+  end
+end
+
 local function DrawTopBar()
   -- Auto-focus search bar on script open (first frame only)
   if S.auto_focus_search and S.frame_count <= 2 then
@@ -4570,7 +4596,10 @@ local function DrawTopBar()
     ActionHardRefresh()
   end
   if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, 'F5 = Refresh (cached)\nShift+F5 = Hard refresh (re-scan metadata + all projects)')
+    local last_ts = tonumber(reaper.GetExtState(CFG.EXT_SECTION, 'last_hard_refresh')) or 0
+    local age = FormatScanAge(last_ts)
+    local age_line = age and ('\nLast scan: ' .. age) or ''
+    ImGui.SetTooltip(ctx, 'F5 = Refresh (cached)\nShift+F5 = Hard refresh (re-scan metadata + all projects)' .. age_line)
   end
 
 end
@@ -4587,35 +4616,37 @@ local function DrawFilterBar()
 
   ImGui.SameLine(ctx)
 
-  -- String count filter
-  ImGui.SetNextItemWidth(ctx, 80)
-  if ImGui.BeginCombo(ctx, '##flt_strings', CFG.STRING_FILTER_OPTIONS[S.filter_strings]) then
-    for i, label in ipairs(CFG.STRING_FILTER_OPTIONS) do
-      if ImGui.Selectable(ctx, label .. '##sf' .. i, S.filter_strings == i) then
-        S.filter_strings = i
-        RefreshFiltered()
+  if S.guitar_mode then
+    -- String count filter
+    ImGui.SetNextItemWidth(ctx, 80)
+    if ImGui.BeginCombo(ctx, '##flt_strings', CFG.STRING_FILTER_OPTIONS[S.filter_strings]) then
+      for i, label in ipairs(CFG.STRING_FILTER_OPTIONS) do
+        if ImGui.Selectable(ctx, label .. '##sf' .. i, S.filter_strings == i) then
+          S.filter_strings = i
+          RefreshFiltered()
+        end
       end
+      ImGui.EndCombo(ctx)
     end
-    ImGui.EndCombo(ctx)
-  end
-  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Filter by string count') end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Filter by string count') end
 
-  ImGui.SameLine(ctx)
+    ImGui.SameLine(ctx)
 
-  -- Tuning filter
-  ImGui.SetNextItemWidth(ctx, 100)
-  if ImGui.BeginCombo(ctx, '##flt_tuning', CFG.TUNING_FILTER_OPTIONS[S.filter_tuning]) then
-    for i, label in ipairs(CFG.TUNING_FILTER_OPTIONS) do
-      if ImGui.Selectable(ctx, label .. '##tf' .. i, S.filter_tuning == i) then
-        S.filter_tuning = i
-        RefreshFiltered()
+    -- Tuning filter
+    ImGui.SetNextItemWidth(ctx, 100)
+    if ImGui.BeginCombo(ctx, '##flt_tuning', CFG.TUNING_FILTER_OPTIONS[S.filter_tuning]) then
+      for i, label in ipairs(CFG.TUNING_FILTER_OPTIONS) do
+        if ImGui.Selectable(ctx, label .. '##tf' .. i, S.filter_tuning == i) then
+          S.filter_tuning = i
+          RefreshFiltered()
+        end
       end
+      ImGui.EndCombo(ctx)
     end
-    ImGui.EndCombo(ctx)
-  end
-  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Filter by tuning') end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Filter by tuning') end
 
-  ImGui.SameLine(ctx)
+    ImGui.SameLine(ctx)
+  end
 
   -- Status filter
   ImGui.SetNextItemWidth(ctx, 120)
@@ -4786,38 +4817,40 @@ local function DrawFilterBar()
     end
   end
 
-  -- Export button (right-aligned)
-  local flt_region = ImGui.GetContentRegionAvail(ctx)
+  -- Export button (right-aligned, hidden when window is too narrow to avoid overlap)
+  -- SameLine() first to stay on the same line as the last widget and get real cursor pos
+  ImGui.SameLine(ctx)
   local flt_cx     = ImGui.GetCursorPosX(ctx)
-  local exp_offset = flt_cx + flt_region - 70
+  local flt_region = ImGui.GetContentRegionAvail(ctx)
+  local exp_offset = flt_cx + flt_region - 90   -- -90 gives ~20px inset from right edge
   if exp_offset > flt_cx + 20 then
     ImGui.SameLine(ctx, exp_offset)
+    if ImGui.SmallButton(ctx, 'Export...') then
+      ImGui.OpenPopup(ctx, '##export_menu')
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, 'Export visible project list')
+    end
+    if ImGui.BeginPopup(ctx, '##export_menu') then
+      local proj_list = S.filtered_projects
+      local count_label = #proj_list .. ' projects'
+      ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
+      ImGui.Text(ctx, count_label)
+      ImGui.PopStyleColor(ctx, 1)
+      ImGui.Separator(ctx)
+      if ImGui.Selectable(ctx, 'Export as CSV', false) then
+        ActionExportList(proj_list, 'csv')
+      end
+      if ImGui.Selectable(ctx, 'Export as Markdown', false) then
+        ActionExportList(proj_list, 'markdown')
+      end
+      if ImGui.Selectable(ctx, 'Export as JSON', false) then
+        ActionExportList(proj_list, 'json')
+      end
+      ImGui.EndPopup(ctx)
+    end
   else
-    ImGui.SameLine(ctx)
-  end
-  if ImGui.SmallButton(ctx, 'Export...') then
-    ImGui.OpenPopup(ctx, '##export_menu')
-  end
-  if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, 'Export visible project list')
-  end
-  if ImGui.BeginPopup(ctx, '##export_menu') then
-    local proj_list = S.filtered_projects
-    local count_label = #proj_list .. ' projects'
-    ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
-    ImGui.Text(ctx, count_label)
-    ImGui.PopStyleColor(ctx, 1)
-    ImGui.Separator(ctx)
-    if ImGui.Selectable(ctx, 'Export as CSV', false) then
-      ActionExportList(proj_list, 'csv')
-    end
-    if ImGui.Selectable(ctx, 'Export as Markdown', false) then
-      ActionExportList(proj_list, 'markdown')
-    end
-    if ImGui.Selectable(ctx, 'Export as JSON', false) then
-      ActionExportList(proj_list, 'json')
-    end
-    ImGui.EndPopup(ctx)
+    ImGui.NewLine(ctx)
   end
 
 end
@@ -4879,53 +4912,55 @@ local function DrawContextMenu(proj, idx)
         end
         ImGui.EndMenu(ctx)
       end
-      if ImGui.BeginMenu(ctx, 'Set Strings') then
-        for _, n in ipairs({6, 7, 8}) do
-          if ImGui.Selectable(ctx, n .. '-string##bstr', false) then
-            for _, p in ipairs(GetSelectedProjects()) do
-              SetTag(p.path, 'strings', n)
-              p.tags = GetTags(p.path)
+      if S.guitar_mode then
+        if ImGui.BeginMenu(ctx, 'Set Strings') then
+          for _, n in ipairs({6, 7, 8}) do
+            if ImGui.Selectable(ctx, n .. '-string##bstr', false) then
+              for _, p in ipairs(GetSelectedProjects()) do
+                SetTag(p.path, 'strings', n)
+                p.tags = GetTags(p.path)
+              end
+              SaveTags()
             end
-            SaveTags()
           end
+          ImGui.Separator(ctx)
+          if ImGui.Selectable(ctx, 'Clear##bstr_clr', false) then
+            S.confirm_bulk_clear_tag = { field = 'strings', projects = GetSelectedProjects() }
+          end
+          ImGui.EndMenu(ctx)
         end
-        ImGui.Separator(ctx)
-        if ImGui.Selectable(ctx, 'Clear##bstr_clr', false) then
-          S.confirm_bulk_clear_tag = { field = 'strings', projects = GetSelectedProjects() }
-        end
-        ImGui.EndMenu(ctx)
-      end
-      if ImGui.BeginMenu(ctx, 'Set Tuning') then
-        for _, t in ipairs(CFG.TUNING_PRESETS) do
-          if ImGui.Selectable(ctx, t .. '##btn', false) then
-            for _, p in ipairs(GetSelectedProjects()) do
-              SetTag(p.path, 'tuning', t)
-              p.tags = GetTags(p.path)
+        if ImGui.BeginMenu(ctx, 'Set Tuning') then
+          for _, t in ipairs(CFG.TUNING_PRESETS) do
+            if ImGui.Selectable(ctx, t .. '##btn', false) then
+              for _, p in ipairs(GetSelectedProjects()) do
+                SetTag(p.path, 'tuning', t)
+                p.tags = GetTags(p.path)
+              end
+              SaveTags()
             end
-            SaveTags()
           end
+          ImGui.Separator(ctx)
+          if ImGui.Selectable(ctx, 'Clear##btn_clr', false) then
+            S.confirm_bulk_clear_tag = { field = 'tuning', projects = GetSelectedProjects() }
+          end
+          ImGui.EndMenu(ctx)
         end
-        ImGui.Separator(ctx)
-        if ImGui.Selectable(ctx, 'Clear##btn_clr', false) then
-          S.confirm_bulk_clear_tag = { field = 'tuning', projects = GetSelectedProjects() }
-        end
-        ImGui.EndMenu(ctx)
-      end
-      if ImGui.BeginMenu(ctx, 'Set Transpose') then
-        for _, t in ipairs(CFG.TRANSPOSE_PRESETS) do
-          if ImGui.Selectable(ctx, t .. '##btp', false) then
-            for _, p in ipairs(GetSelectedProjects()) do
-              SetTag(p.path, 'transpose', t)
-              p.tags = GetTags(p.path)
+        if ImGui.BeginMenu(ctx, 'Set Transpose') then
+          for _, t in ipairs(CFG.TRANSPOSE_PRESETS) do
+            if ImGui.Selectable(ctx, t .. '##btp', false) then
+              for _, p in ipairs(GetSelectedProjects()) do
+                SetTag(p.path, 'transpose', t)
+                p.tags = GetTags(p.path)
+              end
+              SaveTags()
             end
-            SaveTags()
           end
+          ImGui.Separator(ctx)
+          if ImGui.Selectable(ctx, 'Clear##btp_clr', false) then
+            S.confirm_bulk_clear_tag = { field = 'transpose', projects = GetSelectedProjects() }
+          end
+          ImGui.EndMenu(ctx)
         end
-        ImGui.Separator(ctx)
-        if ImGui.Selectable(ctx, 'Clear##btp_clr', false) then
-          S.confirm_bulk_clear_tag = { field = 'transpose', projects = GetSelectedProjects() }
-        end
-        ImGui.EndMenu(ctx)
       end
       if ImGui.BeginMenu(ctx, 'Set Genre') then
         for _, g in ipairs(CFG.PRIMARY_GENRES) do
@@ -5078,65 +5113,67 @@ local function DrawContextMenu(proj, idx)
         end
         ImGui.EndMenu(ctx)
       end
-      if ImGui.BeginMenu(ctx, 'Set Strings##single') then
-        local cur_n = tonumber(tags.strings)
-        for _, n in ipairs({6, 7, 8}) do
-          local is_current = (cur_n == n)
-          if ImGui.Selectable(ctx, (is_current and '> ' or '') .. n .. '-string##sstr', is_current) then
-            SetTag(proj.path, 'strings', n)
-            proj.tags = GetTags(proj.path)
-            SaveTags()
+      if S.guitar_mode then
+        if ImGui.BeginMenu(ctx, 'Set Strings##single') then
+          local cur_n = tonumber(tags.strings)
+          for _, n in ipairs({6, 7, 8}) do
+            local is_current = (cur_n == n)
+            if ImGui.Selectable(ctx, (is_current and '> ' or '') .. n .. '-string##sstr', is_current) then
+              SetTag(proj.path, 'strings', n)
+              proj.tags = GetTags(proj.path)
+              SaveTags()
+            end
           end
-        end
-        if cur_n then
-          ImGui.Separator(ctx)
-          if ImGui.Selectable(ctx, 'Clear##sstr_clr', false) then
-            SetTag(proj.path, 'strings', nil)
-            proj.tags = GetTags(proj.path)
-            SaveTags()
+          if cur_n then
+            ImGui.Separator(ctx)
+            if ImGui.Selectable(ctx, 'Clear##sstr_clr', false) then
+              SetTag(proj.path, 'strings', nil)
+              proj.tags = GetTags(proj.path)
+              SaveTags()
+            end
           end
+          ImGui.EndMenu(ctx)
         end
-        ImGui.EndMenu(ctx)
-      end
-      if ImGui.BeginMenu(ctx, 'Set Tuning##single') then
-        local cur_tuning = tags.tuning or ''
-        for _, t in ipairs(CFG.TUNING_PRESETS) do
-          local is_current = (cur_tuning == t)
-          if ImGui.Selectable(ctx, (is_current and '> ' or '') .. t .. '##stn', is_current) then
-            SetTag(proj.path, 'tuning', t)
-            proj.tags = GetTags(proj.path)
-            SaveTags()
+        if ImGui.BeginMenu(ctx, 'Set Tuning##single') then
+          local cur_tuning = tags.tuning or ''
+          for _, t in ipairs(CFG.TUNING_PRESETS) do
+            local is_current = (cur_tuning == t)
+            if ImGui.Selectable(ctx, (is_current and '> ' or '') .. t .. '##stn', is_current) then
+              SetTag(proj.path, 'tuning', t)
+              proj.tags = GetTags(proj.path)
+              SaveTags()
+            end
           end
-        end
-        if cur_tuning ~= '' then
-          ImGui.Separator(ctx)
-          if ImGui.Selectable(ctx, 'Clear##stn_clr', false) then
-            SetTag(proj.path, 'tuning', nil)
-            proj.tags = GetTags(proj.path)
-            SaveTags()
+          if cur_tuning ~= '' then
+            ImGui.Separator(ctx)
+            if ImGui.Selectable(ctx, 'Clear##stn_clr', false) then
+              SetTag(proj.path, 'tuning', nil)
+              proj.tags = GetTags(proj.path)
+              SaveTags()
+            end
           end
+          ImGui.EndMenu(ctx)
         end
-        ImGui.EndMenu(ctx)
-      end
-      if ImGui.BeginMenu(ctx, 'Set Transpose##single') then
-        local cur_tp = tags.transpose or ''
-        for _, t in ipairs(CFG.TRANSPOSE_PRESETS) do
-          local is_current = (cur_tp == t)
-          if ImGui.Selectable(ctx, (is_current and '> ' or '') .. t .. '##stp', is_current) then
-            SetTag(proj.path, 'transpose', t)
-            proj.tags = GetTags(proj.path)
-            SaveTags()
+        if ImGui.BeginMenu(ctx, 'Set Transpose##single') then
+          local cur_tp = tags.transpose or ''
+          for _, t in ipairs(CFG.TRANSPOSE_PRESETS) do
+            local is_current = (cur_tp == t)
+            if ImGui.Selectable(ctx, (is_current and '> ' or '') .. t .. '##stp', is_current) then
+              SetTag(proj.path, 'transpose', t)
+              proj.tags = GetTags(proj.path)
+              SaveTags()
+            end
           end
-        end
-        if cur_tp ~= '' then
-          ImGui.Separator(ctx)
-          if ImGui.Selectable(ctx, 'Clear##stp_clr', false) then
-            SetTag(proj.path, 'transpose', nil)
-            proj.tags = GetTags(proj.path)
-            SaveTags()
+          if cur_tp ~= '' then
+            ImGui.Separator(ctx)
+            if ImGui.Selectable(ctx, 'Clear##stp_clr', false) then
+              SetTag(proj.path, 'transpose', nil)
+              proj.tags = GetTags(proj.path)
+              SaveTags()
+            end
           end
+          ImGui.EndMenu(ctx)
         end
-        ImGui.EndMenu(ctx)
       end
       if ImGui.BeginMenu(ctx, 'Set Genre##single') then
         local cur_genre = GetPrimaryGenre(tags) or ''
@@ -5293,20 +5330,22 @@ local function DrawTagEditor()
 
   if ImGui.BeginChild(ctx, 'tag_fields_scroll', -1, fields_h) then
 
-  -- String count (radio buttons)
-  ImGui.AlignTextToFramePadding(ctx)
-  ImGui.Text(ctx, 'Strings:')
-  ImGui.SameLine(ctx, lbl_w)
-  local s6 = (tag_edit.strings == '6')
-  local s7 = (tag_edit.strings == '7')
-  local s8 = (tag_edit.strings == '8')
-  if ImGui.RadioButton(ctx, '6##str', s6) then tag_edit.strings = '6' end
-  ImGui.SameLine(ctx)
-  if ImGui.RadioButton(ctx, '7##str', s7) then tag_edit.strings = '7' end
-  ImGui.SameLine(ctx)
-  if ImGui.RadioButton(ctx, '8##str', s8) then tag_edit.strings = '8' end
-  ImGui.SameLine(ctx)
-  if ImGui.RadioButton(ctx, 'N/A##str', not s6 and not s7 and not s8) then tag_edit.strings = '' end
+  if S.guitar_mode then
+    -- String count (radio buttons)
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Strings:')
+    ImGui.SameLine(ctx, lbl_w)
+    local s6 = (tag_edit.strings == '6')
+    local s7 = (tag_edit.strings == '7')
+    local s8 = (tag_edit.strings == '8')
+    if ImGui.RadioButton(ctx, '6##str', s6) then tag_edit.strings = '6' end
+    ImGui.SameLine(ctx)
+    if ImGui.RadioButton(ctx, '7##str', s7) then tag_edit.strings = '7' end
+    ImGui.SameLine(ctx)
+    if ImGui.RadioButton(ctx, '8##str', s8) then tag_edit.strings = '8' end
+    ImGui.SameLine(ctx)
+    if ImGui.RadioButton(ctx, 'N/A##str', not s6 and not s7 and not s8) then tag_edit.strings = '' end
+  end
 
   -- Status
   ImGui.AlignTextToFramePadding(ctx)
@@ -5322,70 +5361,72 @@ local function DrawTagEditor()
     ImGui.EndCombo(ctx)
   end
 
-  -- Tuning
-  ImGui.AlignTextToFramePadding(ctx)
-  ImGui.Text(ctx, 'Tuning:')
-  ImGui.SameLine(ctx, lbl_w)
-  ImGui.SetNextItemWidth(ctx, -1)
-  local tuning_label = tag_edit.tuning ~= '' and tag_edit.tuning or '(none)'
-  if ImGui.BeginCombo(ctx, '##ed_tuning', tuning_label) then
-    if ImGui.Selectable(ctx, '(none)##tn', tag_edit.tuning == '') then tag_edit.tuning = '' end
-    for _, t in ipairs(CFG.TUNING_PRESETS) do
-      if ImGui.Selectable(ctx, t .. '##tn', tag_edit.tuning == t) then tag_edit.tuning = t end
-    end
-    ImGui.EndCombo(ctx)
-  end
-
-  -- Transpose
-  ImGui.AlignTextToFramePadding(ctx)
-  ImGui.Text(ctx, 'Transpose:')
-  ImGui.SameLine(ctx, lbl_w)
-  ImGui.SetNextItemWidth(ctx, -1)
-  local tp_label = tag_edit.transpose ~= '' and tag_edit.transpose or '(none)'
-  if ImGui.BeginCombo(ctx, '##ed_transpose', tp_label) then
-    if ImGui.Selectable(ctx, '(none)##tp', tag_edit.transpose == '') then tag_edit.transpose = '' end
-    for _, t in ipairs(CFG.TRANSPOSE_PRESETS) do
-      if ImGui.Selectable(ctx, t .. '##tp', tag_edit.transpose == t) then tag_edit.transpose = t end
-    end
-    ImGui.EndCombo(ctx)
-  end
-
-  -- Guitar (combo with presets + free text)
-  ImGui.AlignTextToFramePadding(ctx)
-  ImGui.Text(ctx, 'Guitar:')
-  ImGui.SameLine(ctx, lbl_w)
-  ImGui.SetNextItemWidth(ctx, -1)
-  local guitar_label = tag_edit.guitar ~= '' and tag_edit.guitar or '(none)'
-  if ImGui.BeginCombo(ctx, '##ed_guitar', guitar_label) then
-    if ImGui.Selectable(ctx, '(none)##gt', tag_edit.guitar == '') then tag_edit.guitar = '' end
-    for _, g in ipairs(CFG.GUITAR_PRESETS) do
-      if g == 'Custom' then
-        ImGui.Separator(ctx)
-        if ImGui.Selectable(ctx, 'Custom...##gt', false) then tag_edit.guitar = 'Custom' end
-      else
-        if ImGui.Selectable(ctx, g .. '##gt', tag_edit.guitar == g) then tag_edit.guitar = g end
-      end
-    end
-    ImGui.EndCombo(ctx)
-  end
-  -- Show text input below if Custom is selected (or value doesn't match any preset)
-  local is_guitar_preset = false
-  for _, g in ipairs(CFG.GUITAR_PRESETS) do
-    if g ~= 'Custom' and tag_edit.guitar == g then is_guitar_preset = true; break end
-  end
-  if tag_edit.guitar ~= '' and not is_guitar_preset then
-    ImGui.Text(ctx, '')  -- spacer for label column
+  if S.guitar_mode then
+    -- Tuning
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Tuning:')
     ImGui.SameLine(ctx, lbl_w)
     ImGui.SetNextItemWidth(ctx, -1)
-    _, tag_edit.guitar = ImGui.InputText(ctx, '##ed_guitar_custom', tag_edit.guitar)
-  end
+    local tuning_label = tag_edit.tuning ~= '' and tag_edit.tuning or '(none)'
+    if ImGui.BeginCombo(ctx, '##ed_tuning', tuning_label) then
+      if ImGui.Selectable(ctx, '(none)##tn', tag_edit.tuning == '') then tag_edit.tuning = '' end
+      for _, t in ipairs(CFG.TUNING_PRESETS) do
+        if ImGui.Selectable(ctx, t .. '##tn', tag_edit.tuning == t) then tag_edit.tuning = t end
+      end
+      ImGui.EndCombo(ctx)
+    end
 
-  -- Amp/Plugin (text)
-  ImGui.AlignTextToFramePadding(ctx)
-  ImGui.Text(ctx, 'Amp/Plugin:')
-  ImGui.SameLine(ctx, lbl_w)
-  ImGui.SetNextItemWidth(ctx, -1)
-  _, tag_edit.amp = ImGui.InputText(ctx, '##ed_amp', tag_edit.amp)
+    -- Transpose
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Transpose:')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, -1)
+    local tp_label = tag_edit.transpose ~= '' and tag_edit.transpose or '(none)'
+    if ImGui.BeginCombo(ctx, '##ed_transpose', tp_label) then
+      if ImGui.Selectable(ctx, '(none)##tp', tag_edit.transpose == '') then tag_edit.transpose = '' end
+      for _, t in ipairs(CFG.TRANSPOSE_PRESETS) do
+        if ImGui.Selectable(ctx, t .. '##tp', tag_edit.transpose == t) then tag_edit.transpose = t end
+      end
+      ImGui.EndCombo(ctx)
+    end
+
+    -- Guitar (combo with presets + free text)
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Guitar:')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, -1)
+    local guitar_label = tag_edit.guitar ~= '' and tag_edit.guitar or '(none)'
+    if ImGui.BeginCombo(ctx, '##ed_guitar', guitar_label) then
+      if ImGui.Selectable(ctx, '(none)##gt', tag_edit.guitar == '') then tag_edit.guitar = '' end
+      for _, g in ipairs(CFG.GUITAR_PRESETS) do
+        if g == 'Custom' then
+          ImGui.Separator(ctx)
+          if ImGui.Selectable(ctx, 'Custom...##gt', false) then tag_edit.guitar = 'Custom' end
+        else
+          if ImGui.Selectable(ctx, g .. '##gt', tag_edit.guitar == g) then tag_edit.guitar = g end
+        end
+      end
+      ImGui.EndCombo(ctx)
+    end
+    -- Show text input below if Custom is selected (or value doesn't match any preset)
+    local is_guitar_preset = false
+    for _, g in ipairs(CFG.GUITAR_PRESETS) do
+      if g ~= 'Custom' and tag_edit.guitar == g then is_guitar_preset = true; break end
+    end
+    if tag_edit.guitar ~= '' and not is_guitar_preset then
+      ImGui.Text(ctx, '')  -- spacer for label column
+      ImGui.SameLine(ctx, lbl_w)
+      ImGui.SetNextItemWidth(ctx, -1)
+      _, tag_edit.guitar = ImGui.InputText(ctx, '##ed_guitar_custom', tag_edit.guitar)
+    end
+
+    -- Amp/Plugin (text)
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Amp/Plugin:')
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, -1)
+    _, tag_edit.amp = ImGui.InputText(ctx, '##ed_amp', tag_edit.amp)
+  end
 
   -- Genre (primary dropdown + secondary freeform)
   ImGui.AlignTextToFramePadding(ctx)
@@ -5678,24 +5719,26 @@ local function DrawBulkTagEditor()
 
   if ImGui.BeginChild(ctx, 'bulk_fields_scroll', -1, fields_h) then
 
-  -- === Strings ===
-  ImGui.AlignTextToFramePadding(ctx)
-  ImGui.Text(ctx, 'Strings:')
-  ImGui.SameLine(ctx, lbl_w)
-  bulk_edit.strings_mode = BulkModeSelector('bk_strings', bulk_edit.strings_mode)
-  if bulk_edit.strings_mode == 1 then
-    ImGui.Text(ctx, '')
+  if S.guitar_mode then
+    -- === Strings ===
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Strings:')
     ImGui.SameLine(ctx, lbl_w)
-    local s6 = (bulk_edit.strings == '6')
-    local s7 = (bulk_edit.strings == '7')
-    local s8 = (bulk_edit.strings == '8')
-    if ImGui.RadioButton(ctx, '6##bstr', s6) then bulk_edit.strings = '6' end
-    ImGui.SameLine(ctx)
-    if ImGui.RadioButton(ctx, '7##bstr', s7) then bulk_edit.strings = '7' end
-    ImGui.SameLine(ctx)
-    if ImGui.RadioButton(ctx, '8##bstr', s8) then bulk_edit.strings = '8' end
+    bulk_edit.strings_mode = BulkModeSelector('bk_strings', bulk_edit.strings_mode)
+    if bulk_edit.strings_mode == 1 then
+      ImGui.Text(ctx, '')
+      ImGui.SameLine(ctx, lbl_w)
+      local s6 = (bulk_edit.strings == '6')
+      local s7 = (bulk_edit.strings == '7')
+      local s8 = (bulk_edit.strings == '8')
+      if ImGui.RadioButton(ctx, '6##bstr', s6) then bulk_edit.strings = '6' end
+      ImGui.SameLine(ctx)
+      if ImGui.RadioButton(ctx, '7##bstr', s7) then bulk_edit.strings = '7' end
+      ImGui.SameLine(ctx)
+      if ImGui.RadioButton(ctx, '8##bstr', s8) then bulk_edit.strings = '8' end
+    end
+    ImGui.Spacing(ctx)
   end
-  ImGui.Spacing(ctx)
 
   -- === Status ===
   ImGui.AlignTextToFramePadding(ctx)
@@ -5716,43 +5759,45 @@ local function DrawBulkTagEditor()
   end
   ImGui.Spacing(ctx)
 
-  -- === Tuning ===
-  ImGui.AlignTextToFramePadding(ctx)
-  ImGui.Text(ctx, 'Tuning:')
-  ImGui.SameLine(ctx, lbl_w)
-  bulk_edit.tuning_mode = BulkModeSelector('bk_tuning', bulk_edit.tuning_mode)
-  if bulk_edit.tuning_mode == 1 then
-    ImGui.Text(ctx, '')
+  if S.guitar_mode then
+    -- === Tuning ===
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Tuning:')
     ImGui.SameLine(ctx, lbl_w)
-    ImGui.SetNextItemWidth(ctx, -1)
-    local tn_label = bulk_edit.tuning ~= '' and bulk_edit.tuning or '(select)'
-    if ImGui.BeginCombo(ctx, '##bk_tuning_val', tn_label) then
-      for _, t in ipairs(CFG.TUNING_PRESETS) do
-        if ImGui.Selectable(ctx, t .. '##bktn', bulk_edit.tuning == t) then bulk_edit.tuning = t end
+    bulk_edit.tuning_mode = BulkModeSelector('bk_tuning', bulk_edit.tuning_mode)
+    if bulk_edit.tuning_mode == 1 then
+      ImGui.Text(ctx, '')
+      ImGui.SameLine(ctx, lbl_w)
+      ImGui.SetNextItemWidth(ctx, -1)
+      local tn_label = bulk_edit.tuning ~= '' and bulk_edit.tuning or '(select)'
+      if ImGui.BeginCombo(ctx, '##bk_tuning_val', tn_label) then
+        for _, t in ipairs(CFG.TUNING_PRESETS) do
+          if ImGui.Selectable(ctx, t .. '##bktn', bulk_edit.tuning == t) then bulk_edit.tuning = t end
+        end
+        ImGui.EndCombo(ctx)
       end
-      ImGui.EndCombo(ctx)
     end
-  end
-  ImGui.Spacing(ctx)
+    ImGui.Spacing(ctx)
 
-  -- === Transpose ===
-  ImGui.AlignTextToFramePadding(ctx)
-  ImGui.Text(ctx, 'Transpose:')
-  ImGui.SameLine(ctx, lbl_w)
-  bulk_edit.transpose_mode = BulkModeSelector('bk_transpose', bulk_edit.transpose_mode)
-  if bulk_edit.transpose_mode == 1 then
-    ImGui.Text(ctx, '')
+    -- === Transpose ===
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Transpose:')
     ImGui.SameLine(ctx, lbl_w)
-    ImGui.SetNextItemWidth(ctx, -1)
-    local tp_label = bulk_edit.transpose ~= '' and bulk_edit.transpose or '(select)'
-    if ImGui.BeginCombo(ctx, '##bk_transpose_val', tp_label) then
-      for _, t in ipairs(CFG.TRANSPOSE_PRESETS) do
-        if ImGui.Selectable(ctx, t .. '##bktp', bulk_edit.transpose == t) then bulk_edit.transpose = t end
+    bulk_edit.transpose_mode = BulkModeSelector('bk_transpose', bulk_edit.transpose_mode)
+    if bulk_edit.transpose_mode == 1 then
+      ImGui.Text(ctx, '')
+      ImGui.SameLine(ctx, lbl_w)
+      ImGui.SetNextItemWidth(ctx, -1)
+      local tp_label = bulk_edit.transpose ~= '' and bulk_edit.transpose or '(select)'
+      if ImGui.BeginCombo(ctx, '##bk_transpose_val', tp_label) then
+        for _, t in ipairs(CFG.TRANSPOSE_PRESETS) do
+          if ImGui.Selectable(ctx, t .. '##bktp', bulk_edit.transpose == t) then bulk_edit.transpose = t end
+        end
+        ImGui.EndCombo(ctx)
       end
-      ImGui.EndCombo(ctx)
     end
+    ImGui.Spacing(ctx)
   end
-  ImGui.Spacing(ctx)
 
   -- === Difficulty ===
   ImGui.AlignTextToFramePadding(ctx)
@@ -5773,53 +5818,55 @@ local function DrawBulkTagEditor()
   end
   ImGui.Spacing(ctx)
 
-  -- === Guitar ===
-  ImGui.AlignTextToFramePadding(ctx)
-  ImGui.Text(ctx, 'Guitar:')
-  ImGui.SameLine(ctx, lbl_w)
-  bulk_edit.guitar_mode = BulkModeSelector('bk_guitar', bulk_edit.guitar_mode)
-  if bulk_edit.guitar_mode == 1 then
-    ImGui.Text(ctx, '')
+  if S.guitar_mode then
+    -- === Guitar ===
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Guitar:')
     ImGui.SameLine(ctx, lbl_w)
-    ImGui.SetNextItemWidth(ctx, -1)
-    local gt_label = bulk_edit.guitar ~= '' and bulk_edit.guitar or '(select)'
-    if ImGui.BeginCombo(ctx, '##bk_guitar_val', gt_label) then
-      for _, g in ipairs(CFG.GUITAR_PRESETS) do
-        if g == 'Custom' then
-          ImGui.Separator(ctx)
-          if ImGui.Selectable(ctx, 'Custom...##bkgt', false) then bulk_edit.guitar = 'Custom' end
-        else
-          if ImGui.Selectable(ctx, g .. '##bkgt', bulk_edit.guitar == g) then bulk_edit.guitar = g end
-        end
-      end
-      ImGui.EndCombo(ctx)
-    end
-    -- Custom guitar input
-    local is_preset = false
-    for _, g in ipairs(CFG.GUITAR_PRESETS) do
-      if g ~= 'Custom' and bulk_edit.guitar == g then is_preset = true; break end
-    end
-    if bulk_edit.guitar ~= '' and not is_preset then
+    bulk_edit.guitar_mode = BulkModeSelector('bk_guitar', bulk_edit.guitar_mode)
+    if bulk_edit.guitar_mode == 1 then
       ImGui.Text(ctx, '')
       ImGui.SameLine(ctx, lbl_w)
       ImGui.SetNextItemWidth(ctx, -1)
-      _, bulk_edit.guitar = ImGui.InputText(ctx, '##bk_guitar_custom', bulk_edit.guitar)
+      local gt_label = bulk_edit.guitar ~= '' and bulk_edit.guitar or '(select)'
+      if ImGui.BeginCombo(ctx, '##bk_guitar_val', gt_label) then
+        for _, g in ipairs(CFG.GUITAR_PRESETS) do
+          if g == 'Custom' then
+            ImGui.Separator(ctx)
+            if ImGui.Selectable(ctx, 'Custom...##bkgt', false) then bulk_edit.guitar = 'Custom' end
+          else
+            if ImGui.Selectable(ctx, g .. '##bkgt', bulk_edit.guitar == g) then bulk_edit.guitar = g end
+          end
+        end
+        ImGui.EndCombo(ctx)
+      end
+      -- Custom guitar input
+      local is_preset = false
+      for _, g in ipairs(CFG.GUITAR_PRESETS) do
+        if g ~= 'Custom' and bulk_edit.guitar == g then is_preset = true; break end
+      end
+      if bulk_edit.guitar ~= '' and not is_preset then
+        ImGui.Text(ctx, '')
+        ImGui.SameLine(ctx, lbl_w)
+        ImGui.SetNextItemWidth(ctx, -1)
+        _, bulk_edit.guitar = ImGui.InputText(ctx, '##bk_guitar_custom', bulk_edit.guitar)
+      end
     end
-  end
-  ImGui.Spacing(ctx)
+    ImGui.Spacing(ctx)
 
-  -- === Amp/Plugin ===
-  ImGui.AlignTextToFramePadding(ctx)
-  ImGui.Text(ctx, 'Amp/Plugin:')
-  ImGui.SameLine(ctx, lbl_w)
-  bulk_edit.amp_mode = BulkModeSelector('bk_amp', bulk_edit.amp_mode)
-  if bulk_edit.amp_mode == 1 then
-    ImGui.Text(ctx, '')
+    -- === Amp/Plugin ===
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Amp/Plugin:')
     ImGui.SameLine(ctx, lbl_w)
-    ImGui.SetNextItemWidth(ctx, -1)
-    _, bulk_edit.amp = ImGui.InputText(ctx, '##bk_amp_val', bulk_edit.amp)
+    bulk_edit.amp_mode = BulkModeSelector('bk_amp', bulk_edit.amp_mode)
+    if bulk_edit.amp_mode == 1 then
+      ImGui.Text(ctx, '')
+      ImGui.SameLine(ctx, lbl_w)
+      ImGui.SetNextItemWidth(ctx, -1)
+      _, bulk_edit.amp = ImGui.InputText(ctx, '##bk_amp_val', bulk_edit.amp)
+    end
+    ImGui.Spacing(ctx)
   end
-  ImGui.Spacing(ctx)
 
   -- === Genre ===
   ImGui.AlignTextToFramePadding(ctx)
@@ -6345,13 +6392,15 @@ local function DrawProjectList()
     -- Info column (tags summary)
     ImGui.TableSetColumnIndex(ctx, COL_INFO)
     local info_parts = {}
-    if tags.strings then info_parts[#info_parts + 1] = tags.strings .. '-string' end
-    if tags.tuning then
-      local tuning_str = tags.tuning
-      if tags.transpose and tags.transpose ~= '' and tags.transpose ~= '0 (none)' then
-        tuning_str = tuning_str .. ' (' .. tags.transpose .. ')'
+    if S.guitar_mode then
+      if tags.strings then info_parts[#info_parts + 1] = tags.strings .. '-string' end
+      if tags.tuning then
+        local tuning_str = tags.tuning
+        if tags.transpose and tags.transpose ~= '' and tags.transpose ~= '0 (none)' then
+          tuning_str = tuning_str .. ' (' .. tags.transpose .. ')'
+        end
+        info_parts[#info_parts + 1] = tuning_str
       end
-      info_parts[#info_parts + 1] = tuning_str
     end
     if tags.status then
       info_parts[#info_parts + 1] = tags.status
@@ -6831,21 +6880,22 @@ local function DrawActionBar()
   end
   if is_grid then ImGui.PopStyleColor(ctx, 1) end
 
-  -- Right side: Keep open checkbox
-  local region_w = ImGui.GetContentRegionAvail(ctx)
-  local cursor_x = ImGui.GetCursorPosX(ctx)
+  -- Right side: Keep open checkbox (hidden when window is too narrow to avoid overlap)
+  -- SameLine() first to stay on the same line as the last widget and get real cursor pos
+  ImGui.SameLine(ctx)
+  local cursor_x     = ImGui.GetCursorPosX(ctx)
+  local region_w     = ImGui.GetContentRegionAvail(ctx)
   local right_offset = cursor_x + region_w - 150
   if right_offset > cursor_x + 30 then
     ImGui.SameLine(ctx, right_offset)
+    local chg
+    chg, S.keep_open = ImGui.Checkbox(ctx, 'Keep open', S.keep_open)
+    if chg then SaveState() end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, 'Keep window open after opening a project')
+    end
   else
-    ImGui.SameLine(ctx)
-  end
-
-  local chg
-  chg, S.keep_open  = ImGui.Checkbox(ctx, 'Keep open', S.keep_open)
-  if chg then SaveState() end
-  if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, 'Keep window open after opening a project')
+    ImGui.NewLine(ctx)
   end
 
 end
@@ -6885,7 +6935,36 @@ local function DrawStatusBar()
     end
   end
 
-  ImGui.Text(ctx, table.concat(parts, ' '))
+  local left_str = table.concat(parts, ' ')
+
+  -- Right-aligned: scan staleness indicator
+  -- Measure BEFORE rendering left text so the overlap check has real left-text width
+  local last_ts  = tonumber(reaper.GetExtState(CFG.EXT_SECTION, 'last_hard_refresh')) or 0
+  local age      = FormatScanAge(last_ts)
+  local age_str  = age and ('scanned ' .. age) or nil
+  local cursor_x = ImGui.GetCursorPosX(ctx)
+  local avail_w  = ImGui.GetContentRegionAvail(ctx)
+
+  ImGui.Text(ctx, left_str)
+
+  if age_str then
+    local left_w    = ImGui.CalcTextSize(ctx, left_str)
+    local right_w   = ImGui.CalcTextSize(ctx, age_str)
+    local RIGHT_PAD = 20    -- pixels of inset from the right edge  (tune this)
+    local MIN_GAP   = 40    -- minimum clear pixels between left and right text
+    local right_x   = cursor_x + avail_w - right_w - RIGHT_PAD
+
+    if right_x > cursor_x + left_w + MIN_GAP then
+      ImGui.SameLine(ctx, right_x)
+      -- Extra-dim: take C.textDim's RGB but force alpha to ~35% (0x59)
+      -- Tune the last byte: 0x40=25%, 0x59=35%, 0x80=50%
+      local age_color = (C.textDim & 0xFFFFFF00) | 0x59
+      ImGui.PushStyleColor(ctx, ImGui.Col_Text, age_color)
+      ImGui.Text(ctx, age_str)
+      ImGui.PopStyleColor(ctx, 1)
+    end
+  end
+
   ImGui.PopStyleColor(ctx, 1)
 end
 
@@ -6977,6 +7056,16 @@ local function HandleKeys()
       S.selected = {}
       for idx = 1, #S.filtered_projects do S.selected[idx] = true end
       if S.selected_idx < 1 and #S.filtered_projects > 0 then S.selected_idx = 1 end
+    end
+
+    -- Ctrl+C = copy path(s)
+    if ctrl_down and ImGui.IsKeyPressed(ctx, ImGui.Key_C) then
+      if SelectionCount() > 1 then
+        ActionCopyBulk('paths')
+      else
+        local proj = SelectedProject()
+        if proj then ActionCopyPath(proj) end
+      end
     end
 
     local new_idx = S.selected_idx
@@ -7181,6 +7270,26 @@ local function DrawSettingsTab()
 
     ImGui.Spacing(ctx)
 
+    -- Guitar mode toggle
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Guitar Mode:')
+    ImGui.SameLine(ctx, lbl_w)
+    local gm_chg, gm_new = ImGui.Checkbox(ctx, 'Show guitar-specific fields (strings, tuning, transpose, guitar, amp)##gm', S.guitar_mode)
+    if gm_chg then
+      S.guitar_mode = gm_new
+      if not gm_new then
+        -- Reset guitar filters so nothing is filtered invisibly when fields are hidden
+        S.filter_strings = 1; S.filter_tuning = 1
+        S.recent_filter_strings = 1; S.recent_filter_tuning = 1
+        S.all_filter_strings = 1; S.all_filter_tuning = 1
+        RefreshFiltered()
+      end
+      changed = true
+    end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'All guitar field data is preserved in project-tags.json.\nToggling this off only hides the UI — no data is lost.') end
+
+    ImGui.Spacing(ctx)
+
     -- Grid card tooltip mode
     ImGui.AlignTextToFramePadding(ctx)
     ImGui.Text(ctx, 'Grid Card Fields:')
@@ -7208,9 +7317,11 @@ local function DrawSettingsTab()
     ImGui.SameLine(ctx, lbl_w)
     local gdur_chg, gdur_new = ImGui.Checkbox(ctx, 'Duration##grid', S.grid_show_duration)
     if gdur_chg then S.grid_show_duration = gdur_new; changed = true end
-    ImGui.SameLine(ctx)
-    local gstr_chg, gstr_new = ImGui.Checkbox(ctx, 'Strings##grid', S.grid_show_strings)
-    if gstr_chg then S.grid_show_strings = gstr_new; changed = true end
+    if S.guitar_mode then
+      ImGui.SameLine(ctx)
+      local gstr_chg, gstr_new = ImGui.Checkbox(ctx, 'Strings##grid', S.grid_show_strings)
+      if gstr_chg then S.grid_show_strings = gstr_new; changed = true end
+    end
     ImGui.SameLine(ctx)
     local galb_chg, galb_new = ImGui.Checkbox(ctx, 'Album##grid', S.grid_show_album)
     if galb_chg then S.grid_show_album = galb_new; changed = true end
@@ -7225,12 +7336,14 @@ local function DrawSettingsTab()
     ImGui.SameLine(ctx)
     local gdat_chg, gdat_new = ImGui.Checkbox(ctx, 'Date##grid', S.grid_show_date)
     if gdat_chg then S.grid_show_date = gdat_new; changed = true end
-    ImGui.SameLine(ctx)
-    local gtun_chg, gtun_new = ImGui.Checkbox(ctx, 'Tuning##grid', S.grid_show_tuning)
-    if gtun_chg then S.grid_show_tuning = gtun_new; changed = true end
-    ImGui.SameLine(ctx)
-    local gtp_chg, gtp_new = ImGui.Checkbox(ctx, 'Transpose##grid', S.grid_show_transpose)
-    if gtp_chg then S.grid_show_transpose = gtp_new; changed = true end
+    if S.guitar_mode then
+      ImGui.SameLine(ctx)
+      local gtun_chg, gtun_new = ImGui.Checkbox(ctx, 'Tuning##grid', S.grid_show_tuning)
+      if gtun_chg then S.grid_show_tuning = gtun_new; changed = true end
+      ImGui.SameLine(ctx)
+      local gtp_chg, gtp_new = ImGui.Checkbox(ctx, 'Transpose##grid', S.grid_show_transpose)
+      if gtp_chg then S.grid_show_transpose = gtp_new; changed = true end
+    end
 
     -- Grid card spacing
     ImGui.AlignTextToFramePadding(ctx)
@@ -8317,6 +8430,56 @@ local function DrawActionsTab()
     ImGui.PopStyleColor(ctx, 1)
 
     if changed and not ImGui.IsAnyItemActive(ctx) then SaveState() end
+
+    ImGui.Spacing(ctx)
+    ImGui.Spacing(ctx)
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+
+    -- Keyboard Shortcuts
+    ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.accent)
+    ImGui.Text(ctx, 'Keyboard Shortcuts')
+    ImGui.PopStyleColor(ctx, 1)
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+    ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.textDim)
+    ImGui.TextWrapped(ctx, 'Built-in shortcuts. Hotkey customization planned for a future update.')
+    ImGui.PopStyleColor(ctx, 1)
+    ImGui.Spacing(ctx)
+
+    local hk_flags = ImGui.TableFlags_BordersInnerH | ImGui.TableFlags_SizingFixedFit
+    if ImGui.BeginTable(ctx, 'hotkeys_tbl', 2, hk_flags) then
+      ImGui.TableSetupColumn(ctx, 'key', ImGui.TableColumnFlags_WidthFixed, 165)
+      ImGui.TableSetupColumn(ctx, 'act', ImGui.TableColumnFlags_WidthStretch)
+      local rows = {
+        { 'F5',                  'Refresh (uses cached data)' },
+        { 'Shift+F5',            'Hard refresh — re-scan all project folders' },
+        { 'Enter',               'Open selected project' },
+        { 'Double-click',        'Open project' },
+        { 'Up / Down',           'Navigate project list (in grid: move by row) or cycle search history' },
+        { 'Left / Right',        'Navigate grid columns' },
+        { 'Home / End',          'Jump to first or last project' },
+        { 'Ctrl+A',              'Select all visible projects' },
+        { 'Ctrl+C',              'Copy selected project path(s)' },
+        { 'Ctrl+Click',          'Toggle project in/out of selection' },
+        { 'Shift+Click',         'Range select' },
+        { 'Ctrl+Tab',            'Cycle between Recent and All Projects' },
+        { 'Ctrl+1 / 2 / 3 / 4', 'Switch to Recent / All / Settings / Actions' },
+        { 'Ctrl+B',              'Close or hide the launcher' },
+        { 'Escape',              'Clear multi-select, or close (if enabled in Settings)' },
+        { 'Shift+Esc / Ctrl+Q',  'Force-quit — fully exits, bypasses persistent mode' },
+      }
+      for _, row in ipairs(rows) do
+        ImGui.TableNextRow(ctx)
+        ImGui.TableSetColumnIndex(ctx, 0)
+        ImGui.PushStyleColor(ctx, ImGui.Col_Text, C.accent)
+        ImGui.Text(ctx, row[1])
+        ImGui.PopStyleColor(ctx, 1)
+        ImGui.TableSetColumnIndex(ctx, 1)
+        ImGui.Text(ctx, row[2])
+      end
+      ImGui.EndTable(ctx)
+    end
 
     ImGui.Spacing(ctx)
     ImGui.Spacing(ctx)
