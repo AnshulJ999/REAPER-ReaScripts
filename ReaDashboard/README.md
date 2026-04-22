@@ -71,13 +71,18 @@ The **Recent** tab works immediately with no configuration - it reads directly f
 | `F5` | Refresh (uses cached data) |
 | `Shift+F5` | Hard Refresh (re-scans everything) |
 | `Enter` | Open selected project |
-| `Up/Down` | Navigate project list |
-| `Ctrl+Click` | Multi-select |
+| `Double-click` | Open project |
+| `Up / Down` | Navigate project list (in grid: move by row) or cycle search history |
+| `Left / Right` | Navigate grid columns |
+| `Home / End` | Jump to first or last project |
+| `Ctrl+A` | Select all visible projects |
+| `Ctrl+Click` | Toggle project in/out of selection |
 | `Shift+Click` | Range select |
-| `Ctrl+C` | Copy project path |
-| `Ctrl+B` | Close the launcher |
-| `Ctrl+Tab` | Switch tabs |
-| `Ctrl+1,2,3,4` | Switch tabs |
+| `Ctrl+Tab` | Cycle between Recent and All Projects |
+| `Ctrl+1 / 2 / 3 / 4` | Switch to Recent / All / Settings / Actions tab |
+| `Ctrl+B` | Close or hide the launcher |
+| `Escape` | Clear multi-select, or close (if enabled in Settings) |
+| `Shift+Esc / Ctrl+Q` | Force-quit — fully exits script, bypasses persistent mode |
 
 ## FAQs
 
