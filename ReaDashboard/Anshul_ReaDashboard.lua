@@ -1,5 +1,5 @@
 -- @description ReaDashboard
--- @version 1.0.8
+-- @version 1.0.9
 -- @author Anshul
 -- @credits solger (for ReaLauncher concept)
 -- @about
@@ -10,6 +10,12 @@
 --   - ReaImGui
 --   - SWS Extensions
 -- @changelog
+--
+--   v1.0.9
+--     + Statuses are now fully editable in Settings (add, remove, rename — same as Genres)
+--     + 'Browse...' button to open any .rpp file from disk via native OS file dialog
+--     * Fixed: 'All Projects' separator no longer appears redundantly on the All Projects tab
+--     * Fixed: Locate in Explorer / Reveal in Finder crash ('expected 1 arguments maximum')
 --
 --   v1.0.7 and v1.0.8
 --     + Bug fixes
@@ -129,7 +135,7 @@ local ImGui = require 'imgui' '0.10'
 local CFG = {
   -- Script identity
   SCRIPT_NAME    = 'ReaDashboard',
-  SCRIPT_VERSION = '1.0.8',
+  SCRIPT_VERSION = '1.0.9',
   EXT_SECTION    = 'ReaDashboard',
 
   -- Window defaults
@@ -672,7 +678,7 @@ local S = {
 
   -- Configurable primary genres (comma-separated)
   custom_primary_genres = 'Djent,Prog,Metal,Rock,Pop,Blues,Indie,Jazz',
-  custom_statuses = '',  -- comma-separated custom statuses (appended to built-in list)
+  custom_statuses = 'Practicing,Learning,Need to Learn,WIP,Recording,Mixing,Complete,Released,Needs Mixing,On Hold,Abandoned',  -- fully editable comma-separated list
 
   -- Color theme
   accent_color  = 0x4A8FB8,  -- RGB (no alpha), default blue
@@ -1167,30 +1173,16 @@ end
 
 -- Rebuild CFG.STATUS_PRESETS and CFG.STATUS_FILTER_OPTIONS from custom_statuses string
 local function RebuildStatusLists()
-  -- Start with built-in statuses
-  local builtins = {
-    'Practicing', 'Learning', 'Need to Learn',
-    'WIP', 'Recording', 'Mixing', 'Complete', 'Released',
-    'Needs Mixing', 'On Hold', 'Abandoned',
-  }
-  local builtin_set = {}
-  for _, s in ipairs(builtins) do builtin_set[s:lower()] = true end
-
-  -- Parse custom statuses (comma-separated)
-  local customs = {}
-  if S.custom_statuses ~= '' then
-    for s in S.custom_statuses:gmatch('[^,]+') do
-      local trimmed = s:match('^%s*(.-)%s*$')
-      if trimmed ~= '' and not builtin_set[trimmed:lower()] then
-        customs[#customs + 1] = trimmed
-      end
-    end
+  -- Parse the fully editable custom_statuses string (entire list, no hidden builtins)
+  local statuses = {}
+  for s in S.custom_statuses:gmatch('[^,]+') do
+    local trimmed = s:match('^%s*(.-)%s*$')
+    if trimmed ~= '' then statuses[#statuses + 1] = trimmed end
   end
 
-  -- Rebuild CFG.STATUS_PRESETS in-place: builtins + customs
+  -- Rebuild CFG.STATUS_PRESETS in-place
   for i = #CFG.STATUS_PRESETS, 1, -1 do CFG.STATUS_PRESETS[i] = nil end
-  for i, s in ipairs(builtins) do CFG.STATUS_PRESETS[i] = s end
-  for _, s in ipairs(customs) do CFG.STATUS_PRESETS[#CFG.STATUS_PRESETS + 1] = s end
+  for i, s in ipairs(statuses) do CFG.STATUS_PRESETS[i] = s end
 
   -- Rebuild CFG.STATUS_FILTER_OPTIONS: All + all statuses + Unset
   for i = #CFG.STATUS_FILTER_OPTIONS, 1, -1 do CFG.STATUS_FILTER_OPTIONS[i] = nil end
@@ -3397,6 +3389,19 @@ local function ActionNewTab()
   TriggerFollowAction(S.followaction_new_tab)
 end
 
+local function ActionOpenFromDisk()
+  local ok, path = reaper.GetUserFileNameForRead('', 'Open Project', 'rpp')
+  if not ok or not path or path == '' then return end
+  reaper.Main_openProject(ReaperPath(path))
+  -- Detect if user cancelled the save-current dialog
+  local _, path_after = reaper.EnumProjects(-1, '')
+  local t_norm = ReaperPath(path):gsub('\\', '/'):lower()
+  local a_norm = (path_after or ''):gsub('\\', '/'):lower()
+  if t_norm ~= a_norm then return end
+  TriggerFollowAction(S.followaction_load_project)
+  if not S.keep_open then S.window_open = false end
+end
+
 local function ActionLocateInExplorer(proj)
   if not proj or not proj.exists then return end
   if IS_WIN then
@@ -4053,7 +4058,13 @@ local function LoadState()
   if cpg ~= '' then S.custom_primary_genres = cpg end
   RebuildGenreLists()
   local cst = G('custom_statuses')
-  if cst ~= '' then S.custom_statuses = cst end
+  if cst ~= '' then
+    S.custom_statuses = cst
+  end
+  -- Migration: if saved value is empty (pre-v1.0.8), populate with defaults
+  if S.custom_statuses == '' then
+    S.custom_statuses = 'Practicing,Learning,Need to Learn,WIP,Recording,Mixing,Complete,Released,Needs Mixing,On Hold,Abandoned'
+  end
   RebuildStatusLists()
 
   -- Accent color / theme preset
@@ -4989,6 +5000,7 @@ local function DrawContextMenu(proj, idx)
         local locate_label = IS_MAC and 'Reveal in Finder' or 'Locate in Explorer'
         if ImGui.Selectable(ctx, locate_label, false) then ActionLocateInExplorer(proj) end
       end
+      if ImGui.Selectable(ctx, 'Browse...', false) then ActionOpenFromDisk() end
 
       ImGui.Separator(ctx)
 
@@ -6152,7 +6164,7 @@ local function DrawProjectList()
   for i, proj in ipairs(S.filtered_projects) do
     -- Separator: draw a visual divider between recent and all-projects results
     -- Used by both universal search and combined view ("Include All")
-    if S.recent_count_in_filtered > 0 and i == S.recent_count_in_filtered + 1 then
+    if S.recent_count_in_filtered > 0 and i == S.recent_count_in_filtered + 1 and S.active_tab ~= 'all' then
       local sep_label = S.filter_include_all and '  Remaining Projects' or '  All Projects'
       ImGui.TableNextRow(ctx)
       ImGui.TableSetColumnIndex(ctx, COL_PROJECT)
@@ -6430,7 +6442,7 @@ local function DrawGridView()
   local grid_card_index = 0  -- separate counter for grid column layout (resets after separator)
   for i, proj in ipairs(S.filtered_projects) do
     -- Separator in grid view (universal search or combined view)
-    if S.recent_count_in_filtered > 0 and i == S.recent_count_in_filtered + 1 then
+    if S.recent_count_in_filtered > 0 and i == S.recent_count_in_filtered + 1 and S.active_tab ~= 'all' then
       local sep_label = S.filter_include_all and '  Remaining Projects' or '  All Projects'
       -- Force new row for separator
       ImGui.Spacing(ctx)
@@ -6739,9 +6751,15 @@ local function DrawActionBar()
     if SelectionCount() > 1 then ActionOpenSelected() else ActionOpenProject(proj) end
   end
   ImGui.SameLine(ctx)
-  if ImGui.Button(ctx, 'Load in Tab', 100, 0) then ActionLoadInTab(proj) end
+
+  if not can_act then ImGui.EndDisabled(ctx) end
+
+  if ImGui.Button(ctx, 'Browse...', 75, 0) then ActionOpenFromDisk() end
   ImGui.SameLine(ctx)
 
+  if not can_act then ImGui.BeginDisabled(ctx) end
+  if ImGui.Button(ctx, 'Load in Tab', 100, 0) then ActionLoadInTab(proj) end
+  ImGui.SameLine(ctx)
   if not can_act then ImGui.EndDisabled(ctx) end
 
   if ImGui.Button(ctx, 'New Tab', 75, 0) then ActionNewTab() end
@@ -6848,7 +6866,7 @@ local function DrawStatusBar()
     local total = (S.active_tab == 'all' and S.all_projects_loaded) and #S.all_projects or #S.recent_projects
     parts[#parts + 1] = '(filtered from ' .. total .. ')'
   end
-  if S.recent_count_in_filtered > 0 and #S.filtered_projects > S.recent_count_in_filtered then
+  if S.recent_count_in_filtered > 0 and #S.filtered_projects > S.recent_count_in_filtered and S.active_tab ~= 'all' then
     parts[#parts + 1] = '(' .. S.recent_count_in_filtered .. ' recent + ' .. (#S.filtered_projects - S.recent_count_in_filtered) .. ' all)'
   end
 
@@ -7254,9 +7272,9 @@ local function DrawSettingsTab()
     end
     if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Comma-separated list of primary genres.\nUsed in dropdowns, quick-set menus, and genre filter.\nChanges take effect when you leave this field.') end
 
-    -- Custom statuses
+    -- Statuses (fully editable, same pattern as Genres)
     ImGui.AlignTextToFramePadding(ctx)
-    ImGui.Text(ctx, 'Custom Statuses:')
+    ImGui.Text(ctx, 'Statuses:')
     ImGui.SameLine(ctx, lbl_w)
     ImGui.SetNextItemWidth(ctx, -150)
     local cst_chg, cst_new = ImGui.InputText(ctx, '##custom_statuses', S.custom_statuses)
@@ -7265,7 +7283,7 @@ local function DrawSettingsTab()
       RebuildStatusLists()
       changed = true
     end
-    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Comma-separated list of additional custom statuses.\nAppended to the built-in status list.\nLeave empty for built-in statuses only.') end
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Comma-separated list of statuses.\nEdit to add, remove, or rename. Changes take effect when you leave this field.') end
 
     ImGui.Spacing(ctx)
 
