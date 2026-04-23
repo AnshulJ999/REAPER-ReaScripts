@@ -1,5 +1,5 @@
 -- @description ReaDashboard
--- @version 1.1.0
+-- @version 1.1.1
 -- @author Anshul
 -- @credits solger (for ReaLauncher concept)
 -- @about
@@ -10,6 +10,11 @@
 --   - ReaImGui
 --   - SWS Extensions
 -- @changelog
+--
+--   v1.1.1
+--     + Added recursive subfolder scanning for artwork with configurable depth (Settings -> Data Sources)
+--     + Added Tab key shortcut to jump focus from project area back to the search bar
+--     + Added Ctrl+Down/Up shortcuts to instantly jump focus from the search bar into the project area
 --
 --   v1.1.0
 --     + Guitar Mode toggle — hide all guitar-specific fields (strings, tuning, transpose, guitar, amp) via Settings; data untouched
@@ -142,7 +147,7 @@ local ImGui = require 'imgui' '0.10'
 local CFG = {
   -- Script identity
   SCRIPT_NAME    = 'ReaDashboard',
-  SCRIPT_VERSION = '1.1.0',
+  SCRIPT_VERSION = '1.1.1',
   EXT_SECTION    = 'ReaDashboard',
 
   -- Window defaults
@@ -549,6 +554,7 @@ local S = {
   active_tab  = 'recent',  -- 'recent', 'all', or 'settings'
   universal_search = true,
   auto_focus_search = false,  -- auto-focus search bar on script open
+  search_bar_active = false,  -- runtime: search bar has focus or was just deactivated this frame
   recent_count_in_filtered = 0,
   keep_open   = true,
   persistent_mode       = false,  -- keep script alive in background when window closed
@@ -654,6 +660,7 @@ local S = {
   ALL_PROJECTS_PATH  = '',         -- primary path (legacy, for backward compat)
   additional_project_paths = {},   -- additional scan paths (list of strings)
   default_artwork_path = '',  -- fallback art when project has no art
+  art_scan_depth       = 1,   -- depth to recursively scan for artwork (0 = root only)
   placeholder_full_name = false,  -- show full project name on placeholder instead of initials
   debug_logging = false,
   ALL_SCAN_MAX_DEPTH = 10,
@@ -718,7 +725,7 @@ local S = {
 
   -- Search history
   search_history = {},         -- circular buffer of recent searches (newest first)
-  search_history_max = 8,      -- max entries to keep
+  search_history_max = 10,      -- max entries to keep
   search_history_enabled = true, -- toggle in Settings
   search_history_idx = 0,      -- current Up/Down arrow index (0 = live input, 1+ = history)
   search_buf_live = '',        -- live input before arrow navigation started
@@ -726,6 +733,7 @@ local S = {
 
   -- Programmatic tab switching (set by keyboard shortcut, consumed by tab drawing code)
   pending_tab = nil,  -- nil or 'recent'/'all'/'settings'/'actions'
+  focus_search_pending = false,  -- runtime: Ctrl+F triggered, focus search bar next frame
 }
 
 --- Recompute all derived theme colors from current S state. Call after any theme setting change.
@@ -2636,6 +2644,37 @@ local function LoadRecentProjects()
   return result
 end
 
+--- Helper: Collect image full paths recursively up to max_depth.
+local function CollectImages(dir, max_depth, current_depth, results)
+  current_depth = current_depth or 0
+  results = results or {}
+
+  local fidx = 0
+  while true do
+    local fname = reaper.EnumerateFiles(dir, fidx)
+    if not fname then break end
+    local ext = fname:lower():match('%.([^%.]+)$')
+    if ext == 'jpg' or ext == 'jpeg' or ext == 'png' then
+      results[#results + 1] = dir .. '/' .. fname
+    end
+    fidx = fidx + 1
+  end
+
+  if current_depth < max_depth then
+    local didx = 0
+    while true do
+      local dname = reaper.EnumerateSubdirectories(dir, didx)
+      if not dname then break end
+      -- ignore dot folders (.git, .reaper, etc) to be safe
+      if dname:sub(1, 1) ~= '.' then
+        CollectImages(dir .. '/' .. dname, max_depth, current_depth + 1, results)
+      end
+      didx = didx + 1
+    end
+  end
+  return results
+end
+
 --- Enrich projects with metadata from spicetify DB, RPP parsing, album art, and tags.
 local function EnrichProjects(projectList)
   ScanSpicetifyDB()
@@ -2688,30 +2727,21 @@ local function EnrichProjects(projectList)
         end
       end
 
-      -- 1b-1d. Relaxed matching: enumerate all images in folder
+      -- 1b-1d. Relaxed matching: enumerate all images in folder and allowed subfolders
       if not artFound then
-        local images = {}
-        local fidx = 0
-        while true do
-          local fname = reaper.EnumerateFiles(proj.dir, fidx)
-          if not fname then break end
-          local ext = fname:lower():match('%.([^%.]+)$')
-          if ext == 'jpg' or ext == 'jpeg' or ext == 'png' then
-            images[#images + 1] = fname
-          end
-          fidx = fidx + 1
-        end
+        local images = CollectImages(proj.dir, S.art_scan_depth)
 
         if #images == 1 then
-          -- 1b. Single image rule: only one image in folder → use it
-          proj.albumArtPath = proj.dir .. '/' .. images[1]
+          -- 1b. Single image rule: only one image found → use it
+          proj.albumArtPath = images[1]
           artFound = true
         elseif #images > 1 then
           -- 1c. Project-name match: image filename contains the project name
           local projNameLower = proj.name:lower()
-          for _, img in ipairs(images) do
-            if img:lower():find(projNameLower, 1, true) then
-              proj.albumArtPath = proj.dir .. '/' .. img
+          for _, imgPath in ipairs(images) do
+            local filename = imgPath:match('[^/\\]+$') or imgPath
+            if filename:lower():find(projNameLower, 1, true) then
+              proj.albumArtPath = imgPath
               artFound = true
               break
             end
@@ -2720,8 +2750,7 @@ local function EnrichProjects(projectList)
           -- 1d. Most-recently-modified fallback
           if not artFound then
             local bestImg, bestDate = nil, ''
-            for _, img in ipairs(images) do
-              local imgPath = proj.dir .. '/' .. img
+            for _, imgPath in ipairs(images) do
               local imgExists, imgDate = GetFileInfo(imgPath)
               if imgExists and imgDate > bestDate then
                 bestDate = imgDate
@@ -3911,6 +3940,7 @@ local function SaveState()
   Set('symlink_dest',      S.symlink_dest)
 
   Set('default_artwork_path', S.default_artwork_path)
+  Set('art_scan_depth', tostring(S.art_scan_depth))
   Set('placeholder_full_name', S.placeholder_full_name and '1' or '0')
   Set('all_projects_path', S.ALL_PROJECTS_PATH)
   Set('additional_project_paths', table.concat(S.additional_project_paths, '|'))
@@ -4136,6 +4166,8 @@ local function LoadState()
 
   local dap = G('default_artwork_path')
   if dap ~= '' then S.default_artwork_path = dap end
+  local asd = tonumber(G('art_scan_depth'))
+  if asd then S.art_scan_depth = asd end
   local pfn = G('placeholder_full_name')
   if pfn ~= '' then S.placeholder_full_name = (pfn == '1') end
 
@@ -4439,6 +4471,12 @@ local function DrawTopBar()
     ImGui.SetKeyboardFocusHere(ctx)
   end
 
+  -- Ctrl+F: one-shot focus request
+  if S.focus_search_pending then
+    ImGui.SetKeyboardFocusHere(ctx)
+    S.focus_search_pending = false
+  end
+
   -- Before rendering InputText: reset callback signals and pre-compute both
   -- possible history buffers so the EEL callback can pick the right one.
   -- Direction: Down = older history, Up = newer/live (reversed from typical shell).
@@ -4477,8 +4515,24 @@ local function DrawTopBar()
   local use_history_cb = S.search_history_enabled and S.search_history_callback and #S.search_history > 0
   local search_flags = use_history_cb and ImGui.InputTextFlags_CallbackHistory or 0
   local search_cb = use_history_cb and S.search_history_callback or nil
+  if use_history_cb then
+    local ctrl_down = ImGui.IsKeyDown(ctx, ImGui.Key_LeftCtrl) or ImGui.IsKeyDown(ctx, ImGui.Key_RightCtrl)
+    ImGui.Function_SetValue(S.search_history_callback, 'ctrl_is_down', ctrl_down and 1 or 0)
+  end
   changed, S.search_buf = ImGui.InputTextWithHint(ctx, '##search', 'Search projects, artists, tags...', S.search_buf, search_flags, search_cb)
   local search_deactivated = ImGui.IsItemDeactivated(ctx)
+  -- Capture while we're still on the right item: true if currently editing OR just deactivated this frame.
+  -- Used by HandleKeys to avoid closing the window when Escape is pressed to exit the search bar.
+  S.search_bar_active = ImGui.IsItemActive(ctx) or search_deactivated
+
+  -- Tab while search bar is focused: jump directly to project list
+  if S.search_bar_active and ImGui.IsKeyPressed(ctx, ImGui.Key_Tab) then
+    local shift_held = ImGui.IsKeyDown(ctx, ImGui.Key_LeftShift) or ImGui.IsKeyDown(ctx, ImGui.Key_RightShift)
+    if not shift_held then
+      local new_idx = S.selected_idx < 1 and 1 or S.selected_idx
+      SelectOnly(new_idx)
+    end
+  end
 
   -- Auto-save to history when search bar loses focus with non-empty text
   if search_deactivated and S.search_buf ~= '' then
@@ -6981,6 +7035,11 @@ local function HandleKeys()
     return
   end
 
+  -- Ctrl+F = focus search bar (works even when other items have focus)
+  if ctrl_down and ImGui.IsKeyPressed(ctx, ImGui.Key_F) then
+    S.focus_search_pending = true
+  end
+
   -- Ctrl+1/2/3/4 = switch to tab (Recent/All/Settings/Actions)
   if ctrl_down then
     local tab_targets = { 'recent', 'all', 'settings', 'actions' }
@@ -7005,6 +7064,29 @@ local function HandleKeys()
     end
   end
 
+  -- Ctrl+Down/Up: Jump focus from search bar to project area
+  -- If already in project area, this falls through to normal arrow navigation
+  if ctrl_down and (ImGui.IsKeyPressed(ctx, ImGui.Key_DownArrow) or ImGui.IsKeyPressed(ctx, ImGui.Key_UpArrow)) then
+    if S.search_bar_active then
+      -- Search -> Project area
+      local new_idx = S.selected_idx < 1 and 1 or S.selected_idx
+      SelectOnly(new_idx)
+      return -- Prevent Arrow Key navigation block from processing this as a double-movement
+    end
+  end
+
+  -- Tab: Return focus to search bar from project area
+  if ImGui.IsKeyPressed(ctx, ImGui.Key_Tab) and not S.search_bar_active then
+    local shift_held = ImGui.IsKeyDown(ctx, ImGui.Key_LeftShift) or ImGui.IsKeyDown(ctx, ImGui.Key_RightShift)
+    if not shift_held and not ctrl_down then
+      -- Only jump if we are in the project tabs, so we don't break Settings tab navigation
+      if S.active_tab == 'recent' or S.active_tab == 'all' or S.active_tab == 'favorites' then
+        S.focus_search_pending = true
+        return
+      end
+    end
+  end
+
   -- F5 = normal refresh (cached), Shift+F5 = hard refresh (re-scan all)
   if ImGui.IsKeyPressed(ctx, ImGui.Key_F5) then
     if ImGui.IsKeyDown(ctx, ImGui.Key_LeftShift) or ImGui.IsKeyDown(ctx, ImGui.Key_RightShift) then
@@ -7023,13 +7105,15 @@ local function HandleKeys()
     S.window_open = false
   end
 
-  -- Escape: clear selection first, then close/hide window if setting allows
+  -- Escape: clear selection first, then close/hide window if setting allows.
+  -- Guard: if the search bar was active this frame, Escape only unfocused it (Dear ImGui
+  -- handles that internally). Do NOT also close the window — let the user start navigating.
   if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) and not shift_held then
     if SelectionCount() > 1 then
       -- Reduce to single selection on primary idx
       S.selected = {}
       if S.selected_idx > 0 then S.selected[S.selected_idx] = true end
-    elseif S.close_on_escape then
+    elseif S.close_on_escape and not S.search_bar_active then
       S.window_open = false
     end
   end
@@ -7121,6 +7205,11 @@ local function HandleKeys()
           S.confirm_remove_proj = proj
         end
       end
+    end
+
+    -- / = focus search bar (only when no input is active, to avoid stealing the character)
+    if ImGui.IsKeyPressed(ctx, ImGui.Key_Slash) and not ctrl_down then
+      S.focus_search_pending = true
     end
   end
 end
@@ -7267,6 +7356,15 @@ local function DrawSettingsTab()
         changed = true
       end
     end
+
+    -- Artwork Recursive Scan Depth
+    ImGui.AlignTextToFramePadding(ctx)
+    ImGui.Text(ctx, 'Art Scan Depth:')
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, 'Subfolder depth to scan for custom artwork (1 = immediate subfolders).\n0 = only check root project folder.') end
+    ImGui.SameLine(ctx, lbl_w)
+    ImGui.SetNextItemWidth(ctx, 100)
+    local sd_chg, sd_new = ImGui.InputInt(ctx, '##art_scan_depth', S.art_scan_depth)
+    if sd_chg then S.art_scan_depth = math.max(0, math.min(9, sd_new)); changed = true end
 
     ImGui.Spacing(ctx)
 
@@ -8459,6 +8557,11 @@ local function DrawActionsTab()
         { 'Up / Down',           'Navigate project list (in grid: move by row) or cycle search history' },
         { 'Left / Right',        'Navigate grid columns' },
         { 'Home / End',          'Jump to first or last project' },
+        { 'Tab',                 'Toggle focus between search bar and project list' },
+        { 'Ctrl+Down/Up',      'Jump focus from search bar to project list' },
+        { 'Ctrl+F  or  /',        'Focus search bar' },
+        { 'Escape (in search)',  'Unfocus search bar (does not close window)' },
+        { 'Enter (in search)',   'Open selected / first result directly' },
         { 'Ctrl+A',              'Select all visible projects' },
         { 'Ctrl+C',              'Copy selected project path(s)' },
         { 'Ctrl+Click',          'Toggle project in/out of selection' },
@@ -9061,7 +9164,7 @@ local function Init()
   -- Arrow key mapping: Down = older history (direction 1), Up = newer/live (direction -1).
   -- This feels natural: "scroll down through past searches, up to return to current".
   S.search_history_callback = ImGui.CreateFunctionFromEEL([[
-    EventFlag == InputTextFlags_CallbackHistory ? (
+    EventFlag == InputTextFlags_CallbackHistory && !ctrl_is_down ? (
       EventKey == Key_DownArrow ? (
         can_go_older ? (
           hist_direction = 1;
