@@ -75,6 +75,8 @@ The **Recent** tab works immediately with no configuration - it reads directly f
 | `Up / Down` | Navigate project list (in grid: move by row) or cycle search history |
 | `Left / Right` | Navigate grid columns |
 | `Home / End` | Jump to first or last project |
+| `Tab` | Toggle focus between search bar and project list |
+| `Ctrl+Down/Up` | Jump focus from search bar to project list |
 | `Ctrl+F` or `/` | Focus search bar |
 | `Escape` (in search) | Unfocus search bar without closing window |
 | `Enter` (in search) | Open selected / first result directly |
