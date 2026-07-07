@@ -1,5 +1,8 @@
 # ReaDashboard Changelog
 
+## v1.1.2 (2026-07-07)
+* Fixed: script could crash repeatedly and become unusable if the ImGui window context was invalidated mid-session; it now exits cleanly with a log entry instead
+
 ## v1.1.1 (2026-04-23)
 + Added recursive subfolder scanning for artwork with configurable depth (Settings -> Data Sources)
 + Added Tab key shortcut to jump focus from project area back to the search bar

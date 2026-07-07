@@ -1,5 +1,5 @@
 -- @description ReaDashboard
--- @version 1.1.1
+-- @version 1.1.2
 -- @author Anshul
 -- @credits solger (for ReaLauncher concept)
 -- @about
@@ -10,10 +10,8 @@
 --   - ReaImGui
 --   - SWS Extensions
 -- @changelog
---   v1.1.1
---     + Added recursive subfolder scanning for artwork with configurable depth (Settings -> Data Sources)
---     + Added Tab key shortcut to jump focus from project area back to the search bar
---     + Added Ctrl+Down/Up shortcuts to instantly jump focus from the search bar into the project area
+--   v1.1.2
+--     Fixed: script could crash repeatedly and become unusable if the ImGui window context was invalidated mid-session; it now exits cleanly with a log entry instead
 
 -- ============================================================================
 -- DEPENDENCY CHECKS
@@ -603,7 +601,7 @@ local S = {
   ALL_PROJECTS_PATH  = '',         -- primary path (legacy, for backward compat)
   additional_project_paths = {},   -- additional scan paths (list of strings)
   default_artwork_path = '',  -- fallback art when project has no art
-  art_scan_depth       = 1,   -- depth to recursively scan for artwork (0 = root only)
+  art_scan_depth       = 0,   -- depth to recursively scan for artwork (0 = root only)
   placeholder_full_name = false,  -- show full project name on placeholder instead of initials
   debug_logging = false,
   ALL_SCAN_MAX_DEPTH = 10,
@@ -9266,6 +9264,12 @@ local function Loop()
     ImGui.End(ctx)
     ImGui.PopFont(ctx)
     reaper.defer(DeferredLoop)
+    return
+  end
+
+  -- Safety net: validate context is still alive (mirrors hidden-mode check above)
+  if not ImGui.ValidatePtr(ctx, 'ImGui_Context*') then
+    Log('CRITICAL: ImGui context invalidated, exiting')
     return
   end
 
