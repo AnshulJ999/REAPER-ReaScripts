@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" commit="406a581f0d11cd8e595603320b380fdce74f72c8" name="Anshul-ReaScripts">
+<index version="1" commit="76dc276e4a8edf247c3389120708628323b657d5" name="Anshul-ReaScripts">
   <category name="ReaDashboard">
     <reapack name="Anshul_ReaDashboard.lua" type="script" desc="ReaDashboard">
       <metadata>
@@ -97,6 +97,11 @@ v1.0.2
   + Added Tab key shortcut to jump focus from project area back to the search bar
   + Added Ctrl+Down/Up shortcuts to instantly jump focus from the search bar into the project area]]></changelog>
         <source main="main">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/8b9424fde1d2ca1b6cf31040bd157fcf4b4372b0/ReaDashboard/Anshul_ReaDashboard.lua</source>
+      </version>
+      <version name="1.1.2" author="Anshul" time="2026-07-07T03:59:00Z">
+        <changelog><![CDATA[v1.1.2
+  Fixed: script could crash repeatedly and become unusable if the ImGui window context was invalidated mid-session; it now exits cleanly with a log entry instead]]></changelog>
+        <source main="main">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/76dc276e4a8edf247c3389120708628323b657d5/ReaDashboard/Anshul_ReaDashboard.lua</source>
       </version>
     </reapack>
   </category>
