@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" commit="76dc276e4a8edf247c3389120708628323b657d5" name="Anshul-ReaScripts">
+<index version="1" commit="0bd1a714c0ca3fa4befa0594d3d10da12d424595" name="Anshul-ReaScripts">
   <category name="ReaDashboard">
     <reapack name="Anshul_ReaDashboard.lua" type="script" desc="ReaDashboard">
       <metadata>
@@ -410,6 +410,9 @@ v1.0 (27 july 2022)  + Initial release]]></changelog>
     <reapack name="Anshul - Video Companion.py" type="script">
       <version name="1.3.0" time="2026-04-26T12:56:37Z">
         <source main="main">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/406a581f0d11cd8e595603320b380fdce74f72c8/Video/Anshul%20-%20Video%20Companion.py</source>
+      </version>
+      <version name="1.9.0" time="2026-09-27T23:21:55Z">
+        <source main="main">https://github.com/AnshulJ999/REAPER-ReaScripts/raw/0bd1a714c0ca3fa4befa0594d3d10da12d424595/Video/Anshul%20-%20Video%20Companion.py</source>
       </version>
     </reapack>
   </category>
