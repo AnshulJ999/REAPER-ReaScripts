@@ -1,6 +1,56 @@
 #!/usr/bin/env python3
 # REAPER Video Companion — Phase 6 IPC Script
-# Version: 1.3.0
+# Version: 1.9.0
+#
+# v1.9.0: [R1] seek_bar never moved the edit cursor. Backend relay, JSON parse
+#         and the plain "seek" branch were all proven working by curl; only
+#         seek_bar did nothing, and a bare `except: pass` hid the reason.
+#         Dropped the EnumProjects round-trip (proj=0 means current project)
+#         and made the exception handler LOG instead of swallowing.
+#
+# v1.8.0: [S10] FIXED: live tempo + time signature were ALWAYS null.
+#         v1.4.0 called RPR_TimeMap2_timeSigAtTime, which DOES NOT EXIST in the
+#         REAPER API (verified against reascripthelp.html - the real function is
+#         TimeMap_GetTimeSigAtTime; there is no TimeMap2_ variant). The call
+#         raised on every single tick and the surrounding try/except silently
+#         swallowed it, so `live_bpm` and `live_time_sig` shipped as null
+#         forever while bar/beat looked fine. Downstream, the Tab-Viewer's
+#         parseTimeSig(null) fell back to 4/4, which stalled its cursor for the
+#         tail of every bar in every other time signature.
+#         Now: numerator/denominator come from cml/cdenom on the
+#         TimeMap2_timeToBeats call this function ALREADY makes (one call, no
+#         extra cost, and guaranteed consistent with the very `beat` value
+#         shipped alongside them), and tempo comes from the real
+#         TimeMap_GetTimeSigAtTime. Also adds `beats_per_bar` to the payload so
+#         consumers never have to re-derive the host's beat unit themselves.
+#         NOTE: REAPER counts beats in TIME-SIGNATURE DENOMINATOR units, not
+#         quarter notes ("cml = current measure length in beats, i.e. time
+#         signature numerator", per the API docs). So in 7/8 `beat` runs 1..8.
+#
+# KEEP THIS FILE ASCII-ONLY IN ANYTHING NEW.
+#         REAPER's Python reads ReaScripts as cp1252, and cp1252 has no mapping
+#         for byte 0x8f - which is exactly what the warning-sign emoji's
+#         variation selector (U+FE0F) encodes to in UTF-8. Two of those
+#         characters in comments was enough to make the whole script die at
+#         import with a UnicodeDecodeError. Plain ASCII in comments only.
+#         (The pre-existing em-dashes survive because cp1252 does map 0x94.)
+#
+# v1.7.0: [R1] Command socket now also accepts {"seek_bar": N, "beat": f} -
+#         Tab-Viewer click-to-seek. Converts via RPR_TimeMap2_beatsToTime
+#         (already available here; the inverse of _push_state's own
+#         TimeMap2_timeToBeats) rather than asking the Tab-Viewer to invert
+#         the tempo map on its own side.
+#
+# v1.6.0: Added a THIRD UDP target: the Tab-Viewer (port 9066). Same payload,
+#         same send conditions - just one more sendto on the existing socket.
+#         This lets the Tab-Viewer run WITHOUT the video streamer being up;
+#         previously it had to poll the streamer's :9062/playback, which coupled
+#         it to an unrelated process. Costs nothing when nothing is listening.
+#
+# v1.4.0: Added bar/beat (musical position from the tempo map) and project_path
+#         (full .rpp path) to the UDP payload. Consumed by the Tab-Viewer for
+#         variable-tempo-safe (bar-accurate) sync and .gp auto-detection.
+#         Pure additions — existing consumers ignore the new fields.
 #
 # v1.3.0: Single-instance guard (ExtState), video item cache (GetProjectStateChangeCount),
 #         multi-video support (all_videos array in UDP payload for tablet UI selector).
@@ -29,6 +79,17 @@
 #   rate      (float)  : effective video playback rate = global_rate * segment_rate
 #   src_time  (float|null) : source file timestamp in seconds, null if no video item
 #   file      (str|null)   : absolute path to source video file, null if none
+#   bar       (int|null)   : 1-based musical bar at pos (from the tempo map)
+#   beat      (float|null) : 1-based beat within the bar (fractional). NOTE:
+#                            beats are in TIME-SIGNATURE DENOMINATOR units, not
+#                            quarter notes - in 7/8 this runs 1..8.
+#   beats_per_bar (int|null): beats in the current bar = time sig numerator.
+#                            The divisor for turning `beat` into a 0..1
+#                            position through the bar. Sent explicitly so no
+#                            consumer has to re-derive it (v1.8.0).
+#   live_bpm  (float|null) : tempo at pos, in quarter notes per minute
+#   live_time_sig (str|null): e.g. "5/4", the effective signature at pos
+#   project_path (str|null): full path to the open .rpp, null if unsaved
 
 from reaper_python import *
 import socket
@@ -41,6 +102,7 @@ UDP_HOST      = "127.0.0.1"
 UDP_PORT      = 9063
 SYNCLYRICS_UDP_PORT = 9064      # Secondary port for SyncLyrics IPC
 COMMAND_UDP_PORT    = 9065      # Incoming port for SyncLyrics control commands
+TABVIEWER_UDP_PORT  = 9066      # Tertiary port for the Tab-Viewer (ReaTabs) IPC
 PUSH_INTERVAL = 0.05  # seconds between pushes (20 Hz is more than enough for sync)
 HEARTBEAT_INTERVAL = 1.0 # seconds before sending a duplicate packet to keep stream alive
 LOG_STATS_INTERVAL = 30.0 # seconds between rolling stats log entries
@@ -106,10 +168,11 @@ def _log_init():
     try:
         _log_file = open(_log_path, "w", buffering=1)  # line-buffered
         _log_file.write("=" * 60 + "\n")
-        _log_file.write("REAPER Video Companion v1.2.0\n")
+        _log_file.write("REAPER Video Companion v1.9.0\n")
         _log_file.write("Started: {}\n".format(time.strftime("%Y-%m-%d %H:%M:%S")))
         _log_file.write("UDP target 1: {}:{} (Streamer)\n".format(UDP_HOST, UDP_PORT))
         _log_file.write("UDP target 2: {}:{} (SyncLyrics)\n".format(UDP_HOST, SYNCLYRICS_UDP_PORT))
+        _log_file.write("UDP target 3: {}:{} (Tab-Viewer)\n".format(UDP_HOST, TABVIEWER_UDP_PORT))
         _log_file.write("UDP cmd rx  : {}:{}\n".format(UDP_HOST, COMMAND_UDP_PORT))
         _log_file.write("Push rate: {} Hz | Heartbeat: {}s | Stats interval: {}s\n".format(
             int(1.0 / PUSH_INTERVAL), HEARTBEAT_INTERVAL, LOG_STATS_INTERVAL))
@@ -392,18 +455,55 @@ def _push_state():
     else:
         proj_pos = RPR_GetPlayPosition()   # latency-compensated "what you hear"
 
-    active_proj = RPR_EnumProjects(-1, "", 512)[0]
+    _proj_enum = RPR_EnumProjects(-1, "", 512)
+    active_proj = _proj_enum[0]
+    # Full path to the .rpp (empty string for an unsaved project). Lets the
+    # Tab-Viewer auto-detect a .gp sitting beside the project file.
+    project_path = (_proj_enum[2].strip() or None) if len(_proj_enum) > 2 else None
     global_rate = RPR_Master_GetPlayRate(active_proj)  # global playback rate (0 = current project)
 
-    # Live tempo/time-signature at the current cursor position.
-    # RPR_TimeMap2_timeSigAtTime returns (bpm, num, denom) — bpm is tempo at that point.
+    # Musical position AND time signature at the playhead, from ONE call.
+    # bar/beat come straight from REAPER's tempo map, so they stay correct under
+    # variable tempo — the basis for the Tab-Viewer's bar-accurate
+    # (tempo-independent) sync mode.
+    #
+    # RPR_TimeMap2_timeToBeats returns:
+    #   (retval=beats into measure [0-based], proj, tpos,
+    #    measures [0-based], cml, fullbeats, cdenom)
+    # Per REAPER's own docs: "cml will be set to current measure length in beats
+    # (i.e. time signature numerator)" and "cdenom will be set to the current
+    # time signature denominator".
+    #
+    # 🔴 v1.8.0: the numerator/denominator are read HERE rather than from a
+    # separate lookup on purpose. They then describe the exact same measure that
+    # `beat` was measured against, so a consumer dividing beat by beats_per_bar
+    # can never be handed a mismatched pair (e.g. mid-packet across a time
+    # signature change). The previous code asked a different, NONEXISTENT
+    # function for them and got null every time.
     try:
-        _live_bpm, _live_ts_num, _live_ts_denom = RPR_TimeMap2_timeSigAtTime(active_proj, proj_pos)
+        _btb = RPR_TimeMap2_timeToBeats(active_proj, proj_pos, 0, 0, 0, 0)
+        cur_bar = int(_btb[3]) + 1
+        cur_beat = round(_btb[0] + 1.0, 4)
+        _cml = int(_btb[4])       # beats per measure == time signature numerator
+        _cdenom = int(_btb[6])    # time signature denominator
+        beats_per_bar = _cml if _cml > 0 else None
+        live_time_sig = "{}/{}".format(_cml, _cdenom) if _cml > 0 and _cdenom > 0 else None
+    except Exception:
+        cur_bar = None
+        cur_beat = None
+        beats_per_bar = None
+        live_time_sig = None
+
+    # Tempo at the playhead, in quarter notes per minute. Separate call because
+    # timeToBeats does not report tempo. TimeMap_GetTimeSigAtTime is the REAL
+    # function (there is no TimeMap2_ variant); its Python tuple is
+    # (proj, time, timesig_num, timesig_denom, tempo).
+    try:
+        _tsat = RPR_TimeMap_GetTimeSigAtTime(active_proj, proj_pos, 0, 0, 0)
+        _live_bpm = _tsat[4]
         live_bpm = round(_live_bpm, 3) if _live_bpm and _live_bpm > 0 else None
-        live_time_sig = "{}/{}".format(int(_live_ts_num), int(_live_ts_denom)) if _live_ts_num and _live_ts_denom else None
     except Exception:
         live_bpm = None
-        live_time_sig = None
 
     # Project name — used by streamer JS for per-project video preference storage.
     # basename only (e.g. "MySong.rpp") — path is irrelevant and may vary by machine.
@@ -454,6 +554,10 @@ def _push_state():
             "file":     active_item_data["file"]     if active_item_data else None,
             "all_videos": all_videos,
             "project":  proj_name,
+            "project_path": project_path,
+            "bar":      cur_bar,
+            "beat":     cur_beat,
+            "beats_per_bar": beats_per_bar,
             "live_bpm": live_bpm,
             "live_time_sig": live_time_sig,
         })
@@ -466,6 +570,10 @@ def _push_state():
             "file":     None,
             "all_videos": [],
             "project":  proj_name,
+            "project_path": project_path,
+            "bar":      cur_bar,
+            "beat":     cur_beat,
+            "beats_per_bar": beats_per_bar,
             "live_bpm": live_bpm,
             "live_time_sig": live_time_sig,
         })
@@ -496,6 +604,7 @@ def _push_state():
     try:
         _sock.sendto(payload.encode("utf-8"), (UDP_HOST, UDP_PORT))
         _sock.sendto(payload.encode("utf-8"), (UDP_HOST, SYNCLYRICS_UDP_PORT))
+        _sock.sendto(payload.encode("utf-8"), (UDP_HOST, TABVIEWER_UDP_PORT))
     except Exception:
         _stats_errors += 1
 
@@ -546,9 +655,31 @@ def _process_commands():
                     seek_pos = cmd_json["seek"]
                     if isinstance(seek_pos, (int, float)) and seek_pos >= 0:
                         RPR_SetEditCurPos(float(seek_pos), True, True)
+                elif "seek_bar" in cmd_json:
+                    # [R1] Tab-Viewer click-to-seek. bar is 1-based, beat is
+                    # 1-based fractional within the bar, in the host's own beat
+                    # units - the same convention _push_state() reports outward.
+                    # The tempo-map inversion lives here, not in the Tab-Viewer.
+                    bar = cmd_json["seek_bar"]
+                    beat = cmd_json.get("beat", 1.0)
+                    if isinstance(bar, (int, float)) and isinstance(beat, (int, float)):
+                        # *** THE [R1] BUG *** this returns a TUPLE, not a float.
+                        # Every RPR_ wrapper with pointer params does - see
+                        # _push_state's own RPR_TimeMap2_timeToBeats(...)[3]
+                        # a few hundred lines up, which gets this right. The
+                        # missing [0] made SetEditCurPos raise on a tuple, and
+                        # `except: pass` ate it, so the cursor never moved and
+                        # nothing anywhere said why.
+                        # proj=0 = "current project" to the REAPER API.
+                        pos = RPR_TimeMap2_beatsToTime(0, float(beat) - 1.0, int(bar) - 1)[0]
+                        _log("seek_bar: bar={} beat={} -> {:.3f}s".format(bar, beat, pos))
+                        RPR_SetEditCurPos(pos, True, True)  # moveview, seekplay
 
-            except Exception:
-                pass  # Ignore malformed packets
+            except Exception as e:
+                # NEVER swallow this silently. A bare `except: pass` here is how
+                # [S10] stayed hidden for weeks, and it then hid [R1] the same
+                # way. A command that fails must say so in the log.
+                _log("Command failed: {} | payload={}".format(e, data))
     except BlockingIOError:
         pass  # No more data in OS buffer
     except Exception as e:
@@ -591,6 +722,7 @@ def _cleanup():
     try:
         _sock.sendto(stop.encode("utf-8"), (UDP_HOST, UDP_PORT))
         _sock.sendto(stop.encode("utf-8"), (UDP_HOST, SYNCLYRICS_UDP_PORT))
+        _sock.sendto(stop.encode("utf-8"), (UDP_HOST, TABVIEWER_UDP_PORT))
     except Exception:
         pass
     try:
